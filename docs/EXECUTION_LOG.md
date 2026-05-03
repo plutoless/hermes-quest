@@ -1242,6 +1242,33 @@ Re-audit the active Codex Goal against the current checkout and fresh command ou
 #### Next
 - Install native prerequisites, then run `bun run check:native` and `bun run tauri:dev` with `docs/NATIVE_VERIFICATION.md`.
 
+### 2026-05-03 23:12 CST — v0 mock loop committed and pushed
+
+#### Goal
+Preserve the current Hermes Guild v0 implementation and handoff docs in git.
+
+#### Changed
+- Expanded `.gitignore` for Vite, Bun, Tauri, logs, env files, and editor state.
+- Committed the v0 mock loop, docs, tests, and native scaffold as `0d597bc Implement Hermes Guild v0 mock loop`.
+- Pushed `main` to `origin`.
+
+#### Works
+- The remote `main` branch now contains the runnable web/mock Hermes Guild v0 implementation and current documentation.
+- The local working tree was clean after push.
+
+#### Mocked
+- No runtime behavior changed in this checkpoint.
+
+#### Tested
+- Prior verifier for this commit: `bun run verify:web` passed with 24 tests / 96 assertions and production build passed.
+- Fresh native prerequisite check: `bun run check:native` failed as expected, reporting missing `cargo`, `rustc`, `rustup`, and `pkg-config`; WebKit/rsvg checks skipped because `pkg-config` is missing.
+
+#### Blockers
+- Native Tauri runtime verification remains blocked by missing system prerequisites and unavailable sudo password path.
+
+#### Next
+- Install native prerequisites, then run `bun run check:native` and `bun run tauri:dev` with `docs/NATIVE_VERIFICATION.md`.
+
 ## Scope Guard
 Deferred:
 - multiple pets
