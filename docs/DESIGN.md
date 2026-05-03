@@ -2,11 +2,11 @@
 
 ## Summary
 
-Hermes Guild is a desktop-native RPG workbench for AI agents. The product turns Hermes into a set of playable, assignable, reviewable coworkers: selectable desktop pets for quick interaction and a guild hall for serious multi-agent work management.
+Hermes Guild is a desktop-native RPG workbench for AI agents. The product turns Hermes into playable, assignable, reviewable coworkers: a desktop pet for quick interaction and a guild hall for serious agent work management.
 
 One-sentence positioning:
 
-> Hermes Guild is a native desktop RPG-style AI Agent workbench: normally selected Hermes profile pets on the desktop, instantly a guild hall for assigning quests, checking profiles, and reviewing work.
+> Hermes Guild is a native desktop RPG-style AI Agent workbench: a profile-aware desktop pet for assigning quests, plus a guild hall for tracking progress and reviewing returned work.
 
 The key rule is that the game layer must map to real Hermes capability and state. RPG is the interaction language; the v0 product value is task execution, review, and operational visibility.
 
@@ -14,17 +14,20 @@ The key rule is that the game layer must map to real Hermes capability and state
 
 ### Pet Mode
 
-Pet Mode is a set of small persistent desktop companions. Users choose which Hermes profiles appear on the desktop, and each visible pet maps to one profile with its own status and task state.
+Pet Mode v0 is one small persistent desktop companion. The pet represents the current active Hermes profile, and the user can switch that active profile from the pet or Guild Hall.
+
+Multiple simultaneous desktop pets are a v0.5 feature. v0 should not spend its complexity budget on multi-window layout, window grouping, profile routing between multiple pets, or pet group chat.
 
 Core capabilities:
 
-- Floating transparent windows for selected Hermes profiles.
+- One floating transparent desktop pet window.
 - Drag-to-position behavior.
-- Click a pet to talk to that profile by default.
-- Shortcut to open input for the active or most recent pet.
+- Profile switcher for Researcher, Builder, and Reviewer.
+- Click the pet to talk to the active profile by default.
+- Shortcut to open input for the active pet.
 - Optional push-to-talk later.
 - Open Guild Hall from the pet.
-- Show each profile's real Hermes state through animation.
+- Show the active profile's real Hermes state through simple animation.
 - Return with a task report card when work is ready.
 
 Pet states should map to real events:
@@ -32,15 +35,13 @@ Pet states should map to real events:
 | Pet state | Meaning |
 | --- | --- |
 | Idle | No active task, ready for input |
-| Available | Profile can claim queued work |
 | Thinking | Planning, reading context, or waiting on model response |
-| Queued | A relevant task is waiting for pickup |
-| Executing | Task is running |
-| Waiting | Needs user input or review |
+| Running | Task is executing |
+| Blocked | Task needs user input or cannot proceed |
+| Needs Review | Deliverable is ready for review |
 | Error | Gateway, provider, tool, or task failure |
-| Complete | Deliverable is ready for review |
 
-Pinned desktop profiles should be managed from Agents / Characters. v0 should support multiple pinned profile pets, while the default sample roster remains 3 profiles.
+Profile switching should be lightweight. Guild Hall still shows 3 configured characters, but only one profile is active in the desktop pet at a time.
 
 ### Guild Hall Mode
 
@@ -48,10 +49,11 @@ Guild Hall is the focused operational dashboard. It should feel like an RPG guil
 
 v0 pages:
 
-- **Guild Hall / Home**: online agents, active tasks, queued tasks, and pending reviews.
-- **Agents / Characters**: 3 Hermes profiles as RPG badges with simple stats, role, status, basic skills, current task, and desktop pinning.
-- **Quest Board**: task intake and task list with brief, goals, non-goals, assignment mode, queue state, progress, artifacts, and timeline.
+- **Guild Hall / Home**: active agent, active quest, pending reviews, and 3 character summary cards.
+- **Quest Board**: task intake, task list, task detail, progress, artifacts, and timeline.
 - **Review**: completed work waiting for approve or revise.
+
+Agents / Characters can start as a section inside Guild Hall. A dedicated page is only needed once profile management becomes complex.
 
 Post-v0 pages:
 
@@ -69,7 +71,7 @@ The interface should use RPG concepts only when they represent useful Hermes dat
 | Character / badge | Profile / Agent |
 | Class | Agent role, such as Researcher, Reviewer, Ops, Writer, Doctor |
 | Skill card | Hermes skill |
-| Stats | Real ability dimensions and performance signals |
+| Traits | Configured role strengths, constraints, and later performance signals |
 | Equipment | Model, tool permissions, data sources, workspace |
 | Quest | User task |
 | Raid | Long-running or multi-agent task |
@@ -82,20 +84,32 @@ The interface should use RPG concepts only when they represent useful Hermes dat
 | Archive / Library | Memory, docs, decision log, historical tasks |
 | Quest Board | Task intake and tracking |
 
-### Stats
+### Traits
 
-Use semi-game, semi-real stats:
+For v0, avoid presenting preset values as measured performance stats. Use **Traits** or **Role Profile** language instead of numeric stats.
 
-- Planning
-- Execution
-- Research
-- Judgement
-- Reliability
-- Speed
-- Context Discipline
-- Communication
+Example:
 
-Long-term stat sources:
+```text
+Researcher
+Strong: Research, Context Discipline
+Weak: Speed
+Best for: competitive analysis, long-form synthesis
+Avoid: code execution
+```
+
+Possible trait dimensions:
+
+- Planning.
+- Execution.
+- Research.
+- Judgement.
+- Reliability.
+- Speed.
+- Context Discipline.
+- Communication.
+
+Long-term performance signal sources:
 
 - Profile preset.
 - Task history.
@@ -105,13 +119,13 @@ Long-term stat sources:
 - Drift or blockage frequency.
 - Accepted outputs.
 
-For v0, use simple profile preset stats only and clearly mark them as configured signals. Do not derive historical performance stats until enough real task data exists.
+For v0, use simple profile preset traits only and clearly mark them as configured signals. Do not derive historical performance stats until enough real task data exists.
 
 ## MVP Scope
 
 v0 should prove one complete chain:
 
-> A user can hand a task to a Hermes profile from a desktop pet, then watch it execute in Guild Hall, inspect the task lifecycle, and approve or revise the returned report card.
+> A user clicks the desktop pet, says one task, the active Hermes profile does the work, Guild Hall shows progress, the result returns as a Quest Report Card, and the user approves or revises it.
 
 The v0 target is intentionally narrower than the full product vision:
 
@@ -122,25 +136,24 @@ Features that do not prove this loop should be optional or deferred.
 ### Included In v0
 
 - Tauri desktop app.
-- 1-3 desktop pet windows for user-selected Hermes profiles.
-- Text task input.
+- One active desktop pet window.
+- Profile switcher on the pet.
+- Text task input from the pet.
 - Shortcut or pet action to open Guild Hall.
-- Profile pin/unpin controls from Agents / Characters.
-- Pet conversation routed to the clicked profile by default.
-- Basic live state display for idle, available, thinking, queued, executing, waiting, error, and complete.
+- Pet conversation routed to the active profile by default.
+- Basic live state display for idle, thinking, running, blocked, needs review, and error.
 - 3 configurable Hermes agent profiles.
-- Agent cards with role, simple stats, basic skills, current status, and current task.
+- Guild Hall with active agent, active quest, pending reviews, and 3 character summary cards.
+- Agent cards with role, traits, basic skills, current status, and current task.
 - Quest Board with create task, task list, task detail, and direct assignment.
-- Task detail with brief, assignee/claimer, lifecycle state, progress notes, artifacts, errors, and timeline.
-- Task states: created, running, blocked, completed, error, and review.
-- Report card generation for completed tasks.
+- Task detail with brief, assignee, lifecycle state, progress notes, artifacts, errors, and timeline.
+- Task states: idle, thinking, running, blocked, needs_review, error, and approved.
+- Quest Report Card generation for completed tasks.
 - Review panel with completed deliverables, facts, assumptions, known gaps, approve, and revise.
 - Error visibility shared by the pet and task detail.
 
 ### Optional In v0
 
-- Unassigned Quest Board queue.
-- Simple auto-claim using the smallest possible availability and role rule.
 - Global shortcut.
 - Artifact preview.
 - Desktop notification.
@@ -155,6 +168,7 @@ Features that do not prove this loop should be optional or deferred.
 - Multi-profile group pet routing.
 - Pet group chat.
 - Complex desktop pet layout management.
+- Full character management page.
 - Dedicated Tavern page.
 - Full handoff workflow.
 - Skill Deck page.
@@ -173,7 +187,7 @@ Before implementation, v0 should identify which states are real Hermes signals, 
 | UI need | v0 source expectation |
 | --- | --- |
 | Profile list | Hermes-provided if available; otherwise configured through the bridge |
-| Selected profile | Guild-maintained pinned/profile selection state |
+| Active profile | Guild-maintained profile selection state |
 | Task running state | Hermes-provided or wrapped by the bridge |
 | Progress events | Hermes event if available; otherwise normalized from execution logs |
 | Artifacts | Hermes output path or agreed workspace artifact directory |
@@ -186,10 +200,10 @@ Before implementation, v0 should identify which states are real Hermes signals, 
 
 Guild-maintained state:
 
-- Pinned profiles.
+- Active profile.
 - Desktop pet position.
 - Task title, brief, goals, and non-goals.
-- Assignment mode.
+- Direct assignment.
 - Review status.
 - Approve and revise actions.
 - User-facing timeline records.
@@ -206,9 +220,9 @@ Hermes-provided or bridge-derived state:
 
 Guild-generated state:
 
-- Report card.
+- Quest Report Card.
 - Facts, assumptions, and known gaps.
-- RPG stats display.
+- Trait display.
 - Quest summary.
 - Timeline normalization.
 
@@ -222,7 +236,7 @@ Recommended layers:
 - **React app**: Guild Hall dashboard, profile selection, task workflows, review, and state views.
 - **Animation layer**: PixiJS, Rive, Lottie, or similar for pet and character animations; Framer Motion for UI transitions.
 - **Hermes Bridge / Adapter**: normalizes Hermes internals into frontend game objects and events.
-- **Event stream**: WebSocket or SSE for real-time updates shared by Pet Mode and Guild Hall.
+- **Event stream**: start with a local bridge event emitter if Hermes integration is unstable; WebSocket or SSE can replace it when live signals are ready.
 
 The UI should not depend directly on raw Hermes internals. The bridge should expose stable game-readable objects.
 
@@ -235,11 +249,10 @@ The UI should not depend directly on raw Hermes internals. The bridge should exp
 - `class` or `role`
 - `status`
 - `availability`
-- `pinnedToDesktop`
-- `desktopPosition`
+- `activeInPet`
 - `currentTask`
 - `skills`
-- `stats`
+- `traits`
 - `health`
 - `equipment`
 - `lastReport`
@@ -249,10 +262,7 @@ The UI should not depend directly on raw Hermes internals. The bridge should exp
 - `id`
 - `title`
 - `assignee`
-- `assignmentMode`
-- `preferredProfile`
-- `preferredRole`
-- `claimedBy`
+- `brief`
 - `type`
 - `state`
 - `progress`
@@ -281,62 +291,54 @@ The UI should not depend directly on raw Hermes internals. The bridge should exp
 
 The bridge should emit events that both the pet and Guild Hall can consume:
 
-- `profile_pinned`
-- `profile_unpinned`
-- `agent_available`
-- `task_queued`
-- `task_claimed`
+- `active_profile_changed`
+- `agent_idle`
 - `task_started`
 - `task_progress`
 - `task_blocked`
 - `task_completed`
 - `review_required`
+- `review_approved`
+- `revision_requested`
 - `gateway_error`
-- `skill_triggered`
-- `agent_idle`
 
 Each event should include enough task and agent identifiers for the UI to update without guessing.
 
 ### Assignment Rules
 
-Quest Board tasks can be submitted in three modes:
+v0 only needs direct assignment:
 
-- **Direct assignment**: user chooses a specific profile; the task waits for that profile if it is busy.
-- **Preferred assignment**: user chooses a preferred profile or role; another matching available profile may claim it if the preferred one is busy.
-- **Unassigned queue**: user posts the quest to the board; the first available suitable profile claims it.
+- Pet-created tasks are assigned to the active profile.
+- Quest Board-created tasks require the user to choose a profile.
+- If the profile is busy, the task can wait behind that profile's current work without exposing a full queueing system.
 
-For v0, direct assignment is required. Preferred assignment and unassigned queue are optional. Auto-claim should not become a scheduling project in v0.
-
-If simple auto-claim is included, default behavior is:
-
-- Prefer available profiles matching the requested profile, role, or skills.
-- If multiple profiles match, choose the least-loaded available profile.
-- If no profile matches or all matches are busy, keep the task queued and visibly waiting.
-- When a profile claims a task, emit `task_claimed` and add the claim to the task timeline.
+Preferred assignment, unassigned queue, and automatic claiming are v0.5 features.
 
 ## Interaction Requirements
 
 ### Quest Creation
 
-The user can create a quest from Pet Mode or Quest Board. A quest created by talking to a pet is assigned to that profile by default. A quest created on the Quest Board can be directly assigned, preferred for a profile/role, or left unassigned for auto-pickup.
+The user can create a quest from Pet Mode or Quest Board. A quest created by talking to the pet is assigned to the active profile by default. A quest created on the Quest Board is directly assigned to a chosen profile.
+
+Default input should stay light:
+
+- Main input: "What should this agent do?"
+- Advanced fields are collapsed by default.
 
 The task should capture:
 
 - Brief.
-- Goals.
-- Non-goals.
-- Attachments or context references when available.
-- Preferred assignee or role, if specified.
-- Assignment mode.
-- Claiming profile, once claimed.
+- Assigned profile.
+- Optional goals.
+- Optional non-goals.
+- Optional context or attachments.
+- Optional definition of done.
 
 ### Task Timeline
 
 Every task should show a readable execution trace:
 
 - Created.
-- Queued, if not immediately assigned.
-- Claimed, if picked up automatically.
 - Assigned.
 - Started.
 - Progress updates.
@@ -349,7 +351,9 @@ Every task should show a readable execution trace:
 
 Completed work must enter review instead of disappearing into notifications.
 
-Review cards should separate:
+The Quest Report Card is the core reward loop. It should feel like RPG quest completion while remaining grounded in real work.
+
+Report cards should separate:
 
 - What the agent claims it completed.
 - Artifacts.
@@ -357,6 +361,33 @@ Review cards should separate:
 - Assumptions.
 - Known gaps.
 - Recommended next action.
+- Review items such as decisions, risks, and open questions.
+
+Example report card:
+
+```text
+Quest Completed: Prepare newbro demo brief
+
+Reward:
+- Demo Brief Scroll
+- Codex Handoff Card
+- 2 Confirmed Decisions
+- 1 Open Question
+- 1 Risk Warning
+
+Performance:
+- Clarity: A
+- Completeness: B
+- Needs Human Review: Yes
+```
+
+Rewards must map to real artifacts or review objects:
+
+- Scroll = summary document.
+- Handoff Card = next-agent prompt or continuation context.
+- Decision = decision log item.
+- Risk Warning = review item.
+- Open Question = follow-up task or unresolved question.
 
 Available actions:
 
@@ -375,37 +406,42 @@ Guidelines:
 - Avoid fake maps or long navigational ceremony.
 - Pet animations should communicate real state.
 - Completed tasks should feel like returned quest reports, not generic notifications.
-- Multiple visible pets should remain compact and movable so the desktop does not become cluttered.
+- The single active pet should remain compact and movable so the desktop does not become cluttered.
 
 ## Core Demo Script
 
 1. User launches Hermes Guild.
-2. Desktop shows 3 profile pets: Researcher, Builder, and Reviewer.
-3. User clicks Builder and enters: "Help me prepare a newbro demo brief."
-4. Builder pet enters Thinking, then Executing.
-5. Guild Hall shows the quest on the Quest Board.
-6. User opens Task Detail and sees timeline and progress.
-7. Task completes and Builder returns with a report card.
-8. Review shows the deliverable, artifacts, facts, assumptions, known gaps, and suggested next action.
-9. User clicks Revise and asks: "Make it shorter for a 5 minute demo."
-10. The task re-enters execution.
-11. The updated report returns and the user approves it.
+2. Desktop shows one active pet, currently set to Builder.
+3. User opens the pet profile switcher and sees Researcher, Builder, and Reviewer.
+4. User keeps Builder selected and enters: "Help me prepare a newbro demo brief."
+5. Builder pet enters Thinking, then Running.
+6. Guild Hall shows the active agent, active quest, and current progress.
+7. User opens Quest Board task detail and sees timeline and artifacts.
+8. Task completes and Builder returns with a Quest Report Card.
+9. Review shows the deliverable, rewards, facts, assumptions, known gaps, and suggested next action.
+10. User clicks Revise and asks: "Make it shorter for a 5 minute demo."
+11. The task re-enters Running.
+12. The updated report returns and the user approves it.
 
 ## Roadmap
 
 ### v0
 
 - Pet Mode.
-- Profile desktop pinning.
+- One active desktop pet.
+- Pet profile switcher.
 - Guild Hall / Home.
-- Agents / Characters.
 - Quest Board.
 - Task Detail / Timeline.
 - Review panel.
 
 ### v0.5
 
+- Multiple desktop pets.
+- Profile desktop pinning.
 - Simple automatic Quest Board pickup by available profiles.
+- Preferred assignment.
+- Dedicated Agents / Characters page.
 - Tavern / Handoff.
 - Skill Deck.
 - Infirmary page with richer diagnostics.
@@ -427,14 +463,14 @@ Guidelines:
 v0 is successful when:
 
 - A user can start a task from the desktop pet.
-- A user can select which Hermes profiles appear as desktop pets.
-- A desktop pet routes conversation to its mapped profile.
+- A user can switch which Hermes profile the desktop pet represents.
+- A desktop pet routes conversation to the active profile.
 - Pet Mode reflects the task lifecycle using real status.
 - Guild Hall shows the same task and agent state.
 - Quest Board supports task creation and task detail inspection.
 - Task timeline records created, assigned, started, progress, artifact, error, completion, and review events.
 - Completed work appears in Review.
-- Completed work produces a report card with artifacts, facts, assumptions, known gaps, and recommended next action.
+- Completed work produces a Quest Report Card with real rewards, artifacts, facts, assumptions, known gaps, and recommended next action.
 - Review supports approve and revise.
 - Errors surface on the pet and task detail rather than only generic failures.
 - The RPG layer makes the workflow clearer or more engaging without hiding operational truth.
