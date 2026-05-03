@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 
 const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'));
 const schema = JSON.parse(readFileSync('node_modules/@tauri-apps/cli/config.schema.json', 'utf8'));
@@ -22,6 +22,10 @@ if (config.productName !== 'Hermes Guild') {
 
 if (!config.build?.devUrl || !config.build?.frontendDist) {
   fail('build.devUrl and build.frontendDist are required');
+}
+
+if (!existsSync('src-tauri/icons/icon.png')) {
+  fail('src-tauri/icons/icon.png is required by Tauri generated context');
 }
 
 if (config.build.devUrl !== 'http://127.0.0.1:1420') {
@@ -64,6 +68,10 @@ if (petWindow.url !== '/?mode=pet') {
 
 if (petWindow.decorations !== false || petWindow.transparent !== true || petWindow.alwaysOnTop !== true) {
   fail('pet window must be undecorated, transparent, and always on top');
+}
+
+if (petWindow.transparent === true && config.app.macOSPrivateApi !== true) {
+  fail('transparent pet window requires app.macOSPrivateApi on macOS');
 }
 
 const requiredCargoFragments = [
