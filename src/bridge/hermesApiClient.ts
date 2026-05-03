@@ -1,5 +1,12 @@
 import type { HermesApiClient, HermesApiRunEvent, HermesApiRunTaskInput, HermesApiRunTaskResult, HermesHealth } from './types';
 
+interface HermesApiHttpResponse {
+  status: number;
+  body: string;
+}
+
+type HermesApiInvoker = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
+
 export class FetchHermesApiClient implements HermesApiClient {
   private readonly baseUrl: string;
 
@@ -10,15 +17,8 @@ export class FetchHermesApiClient implements HermesApiClient {
   async checkHealth(): Promise<HermesHealth> {
     try {
       const response = await fetch(`${this.baseUrl}/health`);
-      if (!response.ok) {
-        return { ok: false, message: `Hermes API health returned HTTP ${response.status}.` };
-      }
-      const body = await response.json().catch(() => ({}));
-      const status = typeof body.status === 'string' ? body.status : 'unknown';
-      const platform = typeof body.platform === 'string' ? body.platform : 'Hermes API';
-      return status === 'ok'
-        ? { ok: true, message: `${platform} health ok at ${this.baseUrl}` }
-        : { ok: false, message: `${platform} health status: ${status}` };
+      const text = await response.text();
+      return healthFromHttpResponse({ status: response.status, body: text }, this.baseUrl);
     } catch (error) {
       return { ok: false, message: `Hermes API health request failed at ${this.baseUrl}: ${messageFromUnknown(error)}` };
     }
@@ -77,6 +77,82 @@ export class FetchHermesApiClient implements HermesApiClient {
   }
 }
 
+export class NativeHermesApiClient implements HermesApiClient {
+  private readonly baseUrl: string;
+
+  constructor(baseUrl: string, private readonly invokeCommand: HermesApiInvoker) {
+    this.baseUrl = normalizeBaseUrl(baseUrl);
+  }
+
+  async checkHealth(): Promise<HermesHealth> {
+    try {
+      const response = await this.request('GET', `${this.baseUrl}/health`);
+      return healthFromHttpResponse(response, this.baseUrl);
+    } catch (error) {
+      return { ok: false, message: `Hermes API health request failed at ${this.baseUrl}: ${messageFromUnknown(error)}` };
+    }
+  }
+
+  async runTask(input: HermesApiRunTaskInput): Promise<HermesApiRunTaskResult> {
+    const start = await this.request('POST', `${this.baseUrl}/v1/runs`, {
+      input: input.input,
+      instructions: input.instructions,
+      session_id: input.sessionId,
+    });
+    const startBody = parseJson(start.body);
+    if (start.status < 200 || start.status >= 300) {
+      return {
+        ok: false,
+        output: '',
+        error: errorMessageFromBody(startBody, `Hermes API run start returned HTTP ${start.status}.`),
+        events: [],
+      };
+    }
+
+    const runId = typeof startBody.run_id === 'string' ? startBody.run_id : undefined;
+    if (!runId) {
+      return { ok: false, output: '', error: 'Hermes API run response did not include run_id.', events: [] };
+    }
+
+    return this.readRunEvents(runId);
+  }
+
+  private async readRunEvents(runId: string): Promise<HermesApiRunTaskResult> {
+    try {
+      const response = await this.request('GET', `${this.baseUrl}/v1/runs/${encodeURIComponent(runId)}/events`);
+      if (response.status < 200 || response.status >= 300) {
+        return {
+          ok: false,
+          output: '',
+          error: errorMessageFromBody(parseJson(response.body), `Hermes API run events returned HTTP ${response.status}.`),
+          events: [],
+        };
+      }
+      return resultFromEvents(parseSseEvents(response.body));
+    } catch (error) {
+      return {
+        ok: false,
+        output: '',
+        error: `Hermes API event stream failed at ${this.baseUrl}: ${messageFromUnknown(error)}`,
+        events: [],
+      };
+    }
+  }
+
+  private request(method: 'GET' | 'POST', url: string, body?: unknown) {
+    return this.invokeCommand<HermesApiHttpResponse>('hermes_api_request', body === undefined ? { method, url } : { method, url, body });
+  }
+}
+
+export async function createDefaultHermesApiClient(baseUrl: string): Promise<HermesApiClient> {
+  if (isTauriRuntime()) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return new NativeHermesApiClient(baseUrl, invoke);
+  }
+
+  return new FetchHermesApiClient(baseUrl);
+}
+
 export function normalizeBaseUrl(baseUrl: string) {
   return baseUrl.trim().replace(/\/+$/, '') || 'http://127.0.0.1:8642';
 }
@@ -129,4 +205,28 @@ function stringField(value: unknown) {
 
 function messageFromUnknown(error: unknown) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function parseJson(text: string) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+function healthFromHttpResponse(response: HermesApiHttpResponse, baseUrl: string): HermesHealth {
+  if (response.status < 200 || response.status >= 300) {
+    return { ok: false, message: `Hermes API health returned HTTP ${response.status}.` };
+  }
+  const body = parseJson(response.body);
+  const status = typeof body.status === 'string' ? body.status : 'unknown';
+  const platform = typeof body.platform === 'string' ? body.platform : 'Hermes API';
+  return status === 'ok'
+    ? { ok: true, message: `${platform} health ok at ${baseUrl}` }
+    : { ok: false, message: `${platform} health status: ${status}` };
+}
+
+function isTauriRuntime() {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 }

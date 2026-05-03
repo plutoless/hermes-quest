@@ -83,6 +83,10 @@ Reason: Hermes Guild is a desktop workbench, not a CLI wrapper. Real mode should
 Status: accepted  
 Reason: Always-on-top makes the v0 pet obscure the main Guild Hall window. Pet Mode should be a separate movable companion window, not a modal overlay over the primary work surface.
 
+### D016 — Native Hermes API calls bypass WebView CORS
+Status: accepted
+Reason: Tauri is native shell plus WebView UI. Browser-origin rules still apply to `fetch()` from React, so native mode should call the Hermes API through a Tauri command and let Rust perform local HTTP requests without WebView CORS constraints.
+
 ## Checkpoints
 
 ### 2026-05-03 21:13 CST — Documentation setup
@@ -1567,6 +1571,31 @@ Stop the native Pet Mode window from covering the Guild Hall window and make the
 - `cargo check` in `src-tauri`: passed.
 - `bun run tauri:dev`: compiled and launched `target/debug/hermes-guild` with the updated config.
 - Stopped the Tauri dev process and Vite dev server after the native launch check.
+
+### 2026-05-04 02:45 CST — Native Hermes API proxy added
+
+#### Goal
+Stop real bridge health checks from failing in native mode when Hermes API is healthy but rejects WebView-origin browser fetches.
+
+#### Root Cause
+- `curl http://127.0.0.1:8642/health` returned HTTP 200.
+- Requests with WebView-like `Origin` headers returned HTTP 403 from Hermes API.
+- The native app used browser `fetch()` from the React WebView, so WebKit surfaced the CORS rejection as `Load failed`.
+
+#### Changed
+- Added `NativeHermesApiClient`, which uses Tauri `invoke()` instead of browser `fetch()` when `__TAURI_INTERNALS__` is present.
+- Added a Rust `hermes_api_request` command using `reqwest` for native HTTP GET/POST.
+- Kept `FetchHermesApiClient` for browser/Vite mode.
+- Kept the existing Hermes API response parsing, SSE parsing, task completion, and report-card behavior in TypeScript.
+- Added focused tests for native health checks, native `/v1/runs` + SSE reads, browser HTTP errors, and SSE comment handling.
+
+#### Validation
+- `bun test src/bridge/hermesApiClient.test.ts src/bridge/bridgeFactory.test.ts`: passed; 12 tests / 55 assertions.
+- `bun run verify:web`: passed; Tauri config check, TypeScript, 36 tests / 151 assertions, and Vite production build passed.
+- `cargo fmt --check`: passed.
+- `cargo check` in `src-tauri`: passed.
+- `curl -sS http://127.0.0.1:8642/health`: returned `{"status": "ok", "platform": "hermes-agent"}` before native launch.
+- `bun run tauri:dev`: compiled and launched `target/debug/hermes-guild` with the native proxy command registered.
 
 ## Scope Guard
 Deferred:

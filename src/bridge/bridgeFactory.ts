@@ -1,6 +1,6 @@
 import { createMockHermesBridge } from './mockHermesBridge';
 import { RealHermesBridge } from './realHermesBridge';
-import { FetchHermesApiClient, normalizeBaseUrl } from './hermesApiClient';
+import { createDefaultHermesApiClient, normalizeBaseUrl } from './hermesApiClient';
 import type { BridgeConfig, HermesApiClient, HermesBridgeApi } from './types';
 
 const configStorageKey = 'hermes-guild.bridge-config';
@@ -34,7 +34,7 @@ export function saveBridgeConfig(config: BridgeConfig) {
 
 export async function createBridgeFromConfig(config: BridgeConfig, options: BridgeFactoryOptions = {}): Promise<HermesBridgeApi> {
   const sanitized = sanitizeConfig(config);
-  const apiClient = options.apiClient ?? new FetchHermesApiClient(sanitized.hermesApiBaseUrl);
+  const apiClient = options.apiClient ?? await createDefaultHermesApiClient(sanitized.hermesApiBaseUrl);
 
   if (sanitized.bridgeMode === 'mock') {
     return decorateMockBridge(createMockHermesBridge({ persist: options.persistMock ?? false }), {

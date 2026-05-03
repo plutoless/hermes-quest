@@ -1,0 +1,93 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-native:
+    name: Build Native (${{ matrix.platform.name }})
+    runs-on: ${{ matrix.platform.runner }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        platform:
+          - name: macOS
+            runner: macos-latest
+            artifact-name: hermes-guild-macos
+          - name: Windows
+            runner: windows-latest
+            artifact-name: hermes-guild-windows
+          - name: Linux
+            runner: ubuntu-24.04
+            artifact-name: hermes-guild-linux
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux prerequisites
+        if: matrix.platform.runner == 'ubuntu-24.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            libssl-dev \
+            libwebkit2gtk-4.1-dev \
+            pkg-config
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build native app
+        run: bunx tauri build
+
+      - name: Collect release artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-artifacts
+          find src-tauri/target/release/bundle -type f \
+            \( -name "*.dmg" -o -name "*.msi" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) \
+            -exec cp {} release-artifacts/ \;
+
+          while IFS= read -r -d '' app_bundle; do
+            app_name="$(basename "$app_bundle" .app)"
+            tar -czf "release-artifacts/${app_name}-${GITHUB_REF_NAME}-macos.app.tar.gz" \
+              -C "$(dirname "$app_bundle")" "$(basename "$app_bundle")"
+          done < <(find src-tauri/target/release/bundle -type d -name "*.app" -print0)
+
+          find release-artifacts -type f -print
+          artifact_count="$(find release-artifacts -type f -print | wc -l | tr -d ' ')"
+          test "$artifact_count" -gt 0
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.platform.artifact-name }}
+          path: release-artifacts/*
+          if-no-files-found: error
+
+      - name: Attach bundles to GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Hermes Guild ${{ github.ref_name }}
+          tag_name: ${{ github.ref_name }}
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true
+          files: release-artifacts/*

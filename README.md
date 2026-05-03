@@ -57,6 +57,23 @@ Native Tauri target, once Rust/Cargo and Tauri prerequisites are installed:
 bun run tauri:dev
 ```
 
+## GitHub Automation
+
+Pushes and pull requests run `.github/workflows/ci.yml`, which installs Bun, Rust, and Tauri Linux prerequisites, then runs:
+
+```bash
+bun run verify:web
+cargo fmt --check
+cargo check --locked
+```
+
+Pushing a version tag creates a GitHub Release and uploads native bundles for macOS, Windows, and Linux:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
 ## Bridge Modes
 
 Hermes Guild now has three bridge modes:
@@ -90,6 +107,8 @@ GET  <hermesApiBaseUrl>/health
 POST <hermesApiBaseUrl>/v1/runs
 GET  <hermesApiBaseUrl>/v1/runs/{run_id}/events
 ```
+
+In browser/Vite mode, these calls use `fetch()` and therefore require the Hermes API server to allow the dev origin with CORS. In native Tauri mode, Hermes Guild uses a Rust `hermes_api_request` command for these HTTP calls, so local Hermes API access is not blocked by WebView-origin CORS.
 
 Hermes `run.completed` output becomes the Quest Report Card summary. API errors and failed run events are surfaced on the pet, task detail timeline, and system strip.
 
