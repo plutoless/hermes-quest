@@ -1,5 +1,54 @@
 # Hermes Guild v0 Completion Audit
 
+## API-First Real Hermes Bridge Audit
+
+Audit date: 2026-05-04 02:35 CST
+
+### Objective Restated
+
+Replace the subprocess RealHermesBridge with an API-first bridge while preserving MockHermesBridge and the existing pet -> quest -> timeline -> report card -> review loop. Real mode should call the Hermes API server, never silently fall back to mock, and auto mode should be the only mode that falls back to mock when Hermes is unavailable.
+
+### Checklist
+
+| Requirement | Evidence | Status |
+| --- | --- | --- |
+| Read required docs | `docs/PRD.md`, `docs/DESIGN.md`, `docs/AGENT_RULES.md`, `docs/TASKS.md`, `docs/REFERENCES.md`, and `docs/EXECUTION_LOG.md` were read before implementation. | Verified |
+| Create short integration plan | `docs/HERMES_INTEGRATION_PLAN.md` exists and is implementation-oriented. | Verified |
+| Keep MockHermesBridge working | Existing `src/bridge/mockHermesBridge.test.ts` still passes as part of `bun run verify:web`. | Verified |
+| Stable UI-facing bridge interface | `src/bridge/types.ts` defines `HermesBridgeApi`; mock and real bridges implement it. | Verified |
+| Add RealHermesBridge | `src/bridge/realHermesBridge.ts` implements the real adapter behind the shared interface. | Verified |
+| Add BridgeFactory / selection | `src/bridge/bridgeFactory.ts` supports `mock`, `real`, and `auto`; tests cover direct mock, real, auto-real, and auto-fallback. | Verified |
+| Auto fallback only | `bridgeFactory.test.ts` verifies failed auto health returns a mock bridge with visible `fallbackReason`; failed real health keeps `activeImplementation: real` and surfaces the actual failure. | Verified |
+| Local config support | `loadBridgeConfig()` / `saveBridgeConfig()` persist `bridgeMode` and `hermesApiBaseUrl` in local storage. | Verified |
+| Required real bridge methods | `RealHermesBridge` includes `getHealth`, `listAgents`, `setActiveAgent`, `getActiveAgent`, `submitTask`, `getTask`, `reviseTask`, and `approveTask`. | Verified |
+| Pet and Quest Board tasks route through selected bridge | `src/App.tsx` calls `bridge.submitTask()` when the selected bridge supports it, and disables creation while bridge selection is loading. | Verified |
+| API health | `FetchHermesApiClient.checkHealth()` calls `GET <baseUrl>/health`; `bridgeFactory.test.ts` verifies real/auto behavior through the API client. | Verified |
+| API run path | `RealHermesBridge` calls the API client for task submission; tests verify input, instructions, and `sessionId` are sent. | Verified |
+| No unsupported profile mapping | Real bridge does not send Guild profile mappings because `/v1/runs` does not expose a profile parameter; this is documented in report gaps. | Verified |
+| Convert output to Quest Report Card | `bridgeFactory.test.ts` verifies API output appears in a Review report summary. | Verified |
+| Surface failures | `bridgeFactory.test.ts` verifies API failure updates task error, agent error state, error timeline, and system status. | Verified |
+| Show bridge status in UI | Structured `SystemStatus` fields expose selected mode, active implementation, Hermes availability, fallback reason, and API base URL; the top system strip renders them. | Verified |
+| Mock data is labeled | Mock mode and auto fallback expose mock implementation and fallback status; real mode uses Hermes-mapped role labels instead of mock character names. | Verified |
+| README mode setup | `README.md` documents mock, real, auto, local storage config, Hermes API endpoints, selected-bridge task submission, visible fallback behavior, and error behavior. | Verified |
+| Do not expand excluded scope | No Tavern, Infirmary, Skill Deck, gateway UI, memory UI, workspace browser, redesign, or multi-agent orchestration files/features were added. | Verified |
+
+### Command Evidence
+
+- `bun test src/bridge/bridgeFactory.test.ts`: passed after API rewrite with 8 tests / 46 assertions.
+- Full verifier results are recorded in `docs/EXECUTION_LOG.md`.
+
+### Residual Risk
+
+- A live real-mode model task was not submitted in this audit to avoid consuming provider credits or transmitting a generated task prompt without an explicit separate confirmation.
+- Browser/Vite mode can call the Hermes API directly if the API server permits the request; CORS/network failures surface as real-mode errors or auto fallback reasons.
+- Real bridge converts selected `/v1/runs/{run_id}/events` SSE events into Guild timeline entries; blocked state remains Guild-maintained.
+
+### Completion Status
+
+The API-first RealHermesBridge goal is implemented through the bridge/client/UI/docs layer. Final command evidence is tracked in the current execution log checkpoint.
+
+---
+
 Audit date: 2026-05-04 00:40 CST
 
 ## Objective Restated

@@ -57,6 +57,42 @@ Native Tauri target, once Rust/Cargo and Tauri prerequisites are installed:
 bun run tauri:dev
 ```
 
+## Bridge Modes
+
+Hermes Guild now has three bridge modes:
+
+- `mock`: keeps the local MockHermesBridge loop.
+- `real`: uses the Hermes API server.
+- `auto`: tries real Hermes first and falls back to mock when Hermes is unavailable.
+
+The default mode is `auto`. The top system strip includes the bridge selector, Hermes API base URL field, and Apply button. It also shows:
+
+- selected mode: `mock`, `real`, or `auto`
+- active implementation: `mock`, `real`, or `loading`
+- Hermes availability: `available`, `unavailable`, or `unchecked`
+- fallback reason, only when auto mode falls back
+
+Changing the selector writes bridge config to browser/Tauri local storage under `hermes-guild.bridge-config` and rebuilds the active bridge immediately. You can also seed the same config in dev tools:
+
+```js
+localStorage.setItem('hermes-guild.bridge-config', JSON.stringify({
+  bridgeMode: 'auto',
+  hermesApiBaseUrl: 'http://127.0.0.1:8642'
+}))
+```
+
+Use `bridgeMode: 'mock'` to force the mock bridge. Use `bridgeMode: 'real'` to fail visibly instead of falling back when Hermes cannot run. Only `auto` mode may fall back to mock.
+
+Real mode calls:
+
+```text
+GET  <hermesApiBaseUrl>/health
+POST <hermesApiBaseUrl>/v1/runs
+GET  <hermesApiBaseUrl>/v1/runs/{run_id}/events
+```
+
+Hermes `run.completed` output becomes the Quest Report Card summary. API errors and failed run events are surfaced on the pet, task detail timeline, and system strip.
+
 On Ubuntu 24.04, the missing native prerequisites reported by `tauri info` are Rust/Cargo, WebKitGTK 4.1, and rsvg2. A typical setup path is:
 
 ```bash
@@ -69,8 +105,9 @@ Use `docs/NATIVE_VERIFICATION.md` for the native pass/fail checklist after those
 ## What Works
 
 - One active Pet Mode profile.
-- Profile switcher for Lyra / Researcher, Brass / Builder, and Sable / Reviewer.
-- Pet task input creates a quest assigned to the active profile.
+- In mock mode, profile switcher for mock profiles Lyra / Researcher, Brass / Builder, and Sable / Reviewer.
+- In real mode, profile switcher for Hermes-mapped Guild roles: Hermes Researcher, Hermes Builder, and Hermes Reviewer.
+- Pet task input creates a quest through the selected bridge and assigns it to the active profile.
 - Guild Hall shows active profile, active quest, pending reviews, and character cards.
 - Quest Board shows direct task creation, optional advanced brief fields, task list, detail, artifacts, blocked/error states, and timeline.
 - Mock lifecycle events drive thinking/running/needs-review states.
@@ -79,15 +116,25 @@ Use `docs/NATIVE_VERIFICATION.md` for the native pass/fail checklist after those
 - Revise creates a new mock execution pass for the same profile.
 - Block button emits a visible mock blocked state.
 - Error button emits a visible mock gateway error.
+- Auto bridge mode falls back to mock when native Hermes is not available.
+- Real bridge mode can run Hermes API tasks when the Hermes API server is available.
 
 ## What Is Mocked
 
-- Hermes runtime execution.
+- Hermes runtime execution in `mock` mode and in `auto` mode fallback.
 - Agent availability and lifecycle events.
 - Blocked/error lifecycle states.
-- Report card generation.
-- Artifact records.
-- Gateway/provider error events.
+- Report card generation in `mock` mode.
+- Artifact records in `mock` mode.
+- Gateway/provider error events in `mock` mode.
 - Pet position persistence.
 
-The Tauri window configuration is scaffolded for a normal Guild Hall window and a transparent always-on-top pet window, but native behavior still needs verification in a Rust/Tauri-capable environment.
+## What Is Real
+
+- Real mode invokes Hermes through the local Hermes API server.
+- Guild agent ids remain Guild-owned role assignments. They are not sent as Hermes profile parameters because `/v1/runs` does not expose a profile field.
+- Pet and Quest Board submissions call the selected bridge's task submission path.
+- Hermes run output and selected SSE events are converted into task timeline entries and a Quest Report Card.
+- Hermes API failures are surfaced as task, pet, timeline, and system errors.
+
+The real bridge is intentionally minimal: no Hermes WebUI parity, skill management, memory UI, gateway UI, workspace browser, Tavern, Infirmary, or multi-agent orchestration.

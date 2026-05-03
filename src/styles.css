@@ -26,6 +26,7 @@ body {
 
 button,
 select,
+input,
 textarea {
   font: inherit;
 }
@@ -55,7 +56,14 @@ button:hover {
   filter: brightness(1.08);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+  filter: none;
+}
+
 select,
+input,
 textarea {
   width: 100%;
   border: 1px solid #34444f;
@@ -64,7 +72,8 @@ textarea {
   color: #edf1f4;
 }
 
-select {
+select,
+input {
   height: 38px;
   padding: 0 10px;
 }
@@ -249,15 +258,67 @@ label {
 
 .system-strip {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 10px;
-  max-width: 520px;
+  width: min(760px, 100%);
   padding: 10px 12px;
   border: 1px solid #34444f;
   border-radius: 8px;
   background: rgba(21, 28, 34, 0.72);
   color: #c7d3da;
   font-size: 13px;
+}
+
+.bridge-panel {
+  display: grid;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+}
+
+.bridge-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  min-width: 0;
+}
+
+.bridge-status span:last-child {
+  flex-basis: 100%;
+}
+
+.bridge-controls {
+  display: grid;
+  grid-template-columns: 98px minmax(220px, 1fr) 82px;
+  gap: 8px;
+  align-items: start;
+}
+
+.bridge-controls button {
+  min-height: 38px;
+}
+
+.bridge-controls details {
+  grid-column: 1 / -1;
+  border: 1px solid #34444f;
+  border-radius: 8px;
+  background: rgba(17, 24, 30, 0.7);
+}
+
+.bridge-controls summary {
+  min-height: 32px;
+  padding: 7px 10px;
+  color: #d9e3e8;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.bridge-controls details[open] {
+  padding-bottom: 10px;
+}
+
+.bridge-controls details[open] label {
+  margin: 8px 10px 0;
 }
 
 .status-dot {

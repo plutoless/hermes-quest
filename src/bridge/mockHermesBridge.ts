@@ -11,8 +11,7 @@ import type {
   TaskState,
   TimelineEvent,
 } from '../types';
-
-type Listener = (snapshot: BridgeSnapshot, event: BridgeEvent) => void;
+import type { HermesBridgeApi, Listener } from './types';
 type BridgeChannelMessage = {
   origin: string;
   event: BridgeEvent;
@@ -21,18 +20,6 @@ type BridgeChannelMessage = {
 
 interface MockHermesBridgeOptions {
   persist?: boolean;
-}
-
-export interface HermesBridgeApi {
-  getSnapshot(): BridgeSnapshot;
-  subscribe(listener: Listener): () => void;
-  setActiveProfile(agentId: string): void;
-  createTask(input: CreateTaskInput): string;
-  approveReport(reportId: string): void;
-  requestRevision(reportId: string, instructions: string): void;
-  simulateBlocked(taskId?: string): void;
-  simulateError(taskId?: string): void;
-  setPetPosition(position: PetPosition): void;
 }
 
 const now = () => new Date().toISOString();
@@ -132,6 +119,9 @@ const seedSnapshot = (): BridgeSnapshot => ({
   systemStatus: {
     gatewayStatus: 'mocked',
     providerHealth: 'mocked',
+    bridgeMode: 'mock',
+    activeImplementation: 'mock',
+    hermesAvailable: 'unchecked',
     logsSummary: 'Mock Hermes Bridge is driving lifecycle events locally.',
     warnings: ['Native pet window behavior is configured but not verified without Rust/Tauri runtime.'],
   },
@@ -318,6 +308,10 @@ class MockHermesBridge {
   setPetPosition(position: PetPosition) {
     this.snapshot.petPosition = position;
     this.emit(makeEvent('active_profile_changed', this.snapshot.activeProfileId, undefined, { petPosition: position }));
+  }
+
+  async submitTask(input: CreateTaskInput) {
+    return this.createTask(input);
   }
 
   private scheduleLifecycle(taskId: string) {

@@ -99,6 +99,11 @@ export interface ReportCard {
 export interface SystemStatus {
   gatewayStatus: 'mocked' | 'connected' | 'error';
   providerHealth: 'mocked' | 'healthy' | 'degraded';
+  bridgeMode: 'mock' | 'real' | 'auto';
+  activeImplementation: 'mock' | 'real' | 'loading';
+  hermesAvailable: 'available' | 'unavailable' | 'unchecked';
+  fallbackReason?: string;
+  hermesApiBaseUrl?: string;
   logsSummary: string;
   warnings: string[];
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Check,
@@ -17,7 +17,8 @@ import {
   Sparkles,
 } from 'lucide-react';
 import { useBridgeSnapshot } from './hooks/useBridgeSnapshot';
-import type { Agent, ReportCard, Task } from './types';
+import type { BridgeConfig, BridgeMode } from './bridge/types';
+import type { Agent, ReportCard, SystemStatus, Task } from './types';
 
 const isPetWindowMode = () => new URLSearchParams(window.location.search).get('mode') === 'pet';
 
@@ -32,6 +33,13 @@ async function focusGuildHallWindow() {
   await mainWindow.unminimize();
   await mainWindow.setFocus();
   return true;
+}
+
+async function startPetWindowDrag() {
+  if (!('__TAURI_INTERNALS__' in window) || !isPetWindowMode()) return;
+
+  const { getCurrentWindow } = await import('@tauri-apps/api/window');
+  await getCurrentWindow().startDragging();
 }
 
 const statusLabel: Record<string, string> = {
@@ -54,8 +62,20 @@ const roleIcon = {
 
 const isActionableReportTask = (task: Task | undefined) => task?.state === 'needs_review' && task.reviewStatus === 'required';
 
+function BridgeStatus({ status }: { status: SystemStatus }) {
+  return (
+    <span className="bridge-status">
+      <strong>{status.bridgeMode}</strong>
+      <span>impl: {status.activeImplementation}</span>
+      <span>Hermes: {status.hermesAvailable}</span>
+      {status.fallbackReason && <span>fallback: {status.fallbackReason}</span>}
+      <span>{status.logsSummary}</span>
+    </span>
+  );
+}
+
 function App() {
-  const { snapshot, lastEvent, bridge } = useBridgeSnapshot();
+  const { snapshot, lastEvent, bridge, bridgeReady, bridgeConfig, applyBridgeConfig } = useBridgeSnapshot();
   const [activeView, setActiveView] = useState<'hall' | 'board' | 'review'>('hall');
   const [petOnly] = useState(isPetWindowMode);
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
@@ -67,6 +87,7 @@ function App() {
   const [boardDefinitionOfDone, setBoardDefinitionOfDone] = useState('');
   const [boardAssignee, setBoardAssignee] = useState(snapshot.activeProfileId);
   const [revisionText, setRevisionText] = useState('Make it shorter for a 5 minute demo.');
+  const [draftBridgeConfig, setDraftBridgeConfig] = useState(bridgeConfig);
 
   const activeAgent = snapshot.agents.find((agent) => agent.id === snapshot.activeProfileId) ?? snapshot.agents[0];
   const tasks = snapshot.tasks;
@@ -80,25 +101,32 @@ function App() {
     return isActionableReportTask(task);
   });
 
-  function createPetQuest() {
+  useEffect(() => {
+    setDraftBridgeConfig(bridgeConfig);
+  }, [bridgeConfig]);
+
+  async function createPetQuest() {
     if (!petInput.trim()) return;
-    const taskId = bridge.createTask({ brief: petInput.trim(), assigneeId: activeAgent.id, type: 'pet' });
+    const taskId = bridge.submitTask
+      ? await bridge.submitTask({ brief: petInput.trim(), assigneeId: activeAgent.id, type: 'pet' })
+      : bridge.createTask({ brief: petInput.trim(), assigneeId: activeAgent.id, type: 'pet' });
     setSelectedTaskId(taskId);
     setActiveView('board');
     setPetInput('');
   }
 
-  function createBoardQuest() {
+  async function createBoardQuest() {
     if (!boardInput.trim()) return;
-    const taskId = bridge.createTask({
+    const taskInput = {
       brief: boardInput.trim(),
       goals: boardGoals.trim() || undefined,
       nonGoals: boardNonGoals.trim() || undefined,
       context: boardContext.trim() || undefined,
       definitionOfDone: boardDefinitionOfDone.trim() || undefined,
       assigneeId: boardAssignee,
-      type: 'quest_board',
-    });
+      type: 'quest_board' as const,
+    };
+    const taskId = bridge.submitTask ? await bridge.submitTask(taskInput) : bridge.createTask(taskInput);
     setSelectedTaskId(taskId);
     setBoardInput('');
     setBoardGoals('');
@@ -129,6 +157,8 @@ function App() {
             setBoardAssignee(agentId);
           }}
           onOpenHall={openHall}
+          bridgeReady={bridgeReady}
+          nativeDragEnabled={petOnly}
         />
       </div>
     );
@@ -148,6 +178,8 @@ function App() {
           setBoardAssignee(agentId);
         }}
         onOpenHall={openHall}
+        bridgeReady={bridgeReady}
+        nativeDragEnabled={petOnly}
       />
 
       <main className="guild-shell">
@@ -158,7 +190,15 @@ function App() {
           </div>
           <div className="system-strip">
             <span className={`status-dot ${snapshot.systemStatus.gatewayStatus}`} />
-            <span>{snapshot.systemStatus.logsSummary}</span>
+            <div className="bridge-panel">
+              <BridgeStatus status={snapshot.systemStatus} />
+              <BridgeControls
+                config={draftBridgeConfig}
+                bridgeReady={bridgeReady}
+                onConfigChange={setDraftBridgeConfig}
+                onApply={() => applyBridgeConfig(draftBridgeConfig)}
+              />
+            </div>
           </div>
         </header>
 
@@ -173,10 +213,10 @@ function App() {
             <ScrollText size={16} /> Review
             {pendingReports.length > 0 && <strong>{pendingReports.length}</strong>}
           </button>
-          <button className="ghost" onClick={() => bridge.simulateError(selectedTask?.id)} title="Simulate mock bridge error">
+          <button className="ghost" onClick={() => bridge.simulateError(selectedTask?.id)} title="Simulate bridge error" disabled={!bridgeReady}>
             <AlertTriangle size={16} /> Error
           </button>
-          <button className="ghost" onClick={() => bridge.simulateBlocked(selectedTask?.id)} title="Simulate mock blocked state">
+          <button className="ghost" onClick={() => bridge.simulateBlocked(selectedTask?.id)} title="Simulate blocked state" disabled={!bridgeReady}>
             <CirclePause size={16} /> Block
           </button>
         </nav>
@@ -216,6 +256,7 @@ function App() {
             onBoardAssignee={setBoardAssignee}
             onCreateQuest={createBoardQuest}
             onSelectTask={setSelectedTaskId}
+            bridgeReady={bridgeReady}
           />
         )}
 
@@ -245,6 +286,46 @@ function App() {
   );
 }
 
+interface BridgeControlsProps {
+  config: BridgeConfig;
+  bridgeReady: boolean;
+  onConfigChange: (config: BridgeConfig) => void;
+  onApply: () => void;
+}
+
+function BridgeControls({ config, bridgeReady, onConfigChange, onApply }: BridgeControlsProps) {
+  const updateConfig = (patch: Partial<BridgeConfig>) => onConfigChange({ ...config, ...patch });
+
+  return (
+    <form
+      className="bridge-controls"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onApply();
+      }}
+    >
+      <select
+        aria-label="Bridge mode"
+        value={config.bridgeMode}
+        onChange={(event) => updateConfig({ bridgeMode: event.target.value as BridgeMode })}
+      >
+        <option value="mock">mock</option>
+        <option value="auto">auto</option>
+        <option value="real">real</option>
+      </select>
+      <input
+        aria-label="Hermes API base URL"
+        value={config.hermesApiBaseUrl}
+        onChange={(event) => updateConfig({ hermesApiBaseUrl: event.target.value })}
+        placeholder="Hermes API base URL"
+      />
+      <button type="submit" disabled={!bridgeReady}>
+        Apply
+      </button>
+    </form>
+  );
+}
+
 interface PetPanelProps {
   activeAgent: Agent;
   agents: Agent[];
@@ -254,6 +335,8 @@ interface PetPanelProps {
   onCreateQuest: () => void;
   onProfileChange: (agentId: string) => void;
   onOpenHall: () => void;
+  bridgeReady: boolean;
+  nativeDragEnabled: boolean;
 }
 
 function PetPanel({
@@ -265,12 +348,20 @@ function PetPanel({
   onCreateQuest,
   onProfileChange,
   onOpenHall,
+  bridgeReady,
+  nativeDragEnabled,
 }: PetPanelProps) {
   const Icon = roleIcon[activeAgent.role];
 
   return (
     <aside className={`pet-panel ${activeAgent.status}`}>
-      <div className="drag-strip" data-tauri-drag-region>
+      <div
+        className="drag-strip"
+        data-tauri-drag-region={nativeDragEnabled ? '' : undefined}
+        onMouseDown={() => {
+          if (nativeDragEnabled) void startPetWindowDrag();
+        }}
+      >
         Pet Mode
       </div>
       <div className="pet-avatar" aria-label={`${activeAgent.name} is ${statusLabel[activeAgent.status]}`}>
@@ -296,7 +387,7 @@ function PetPanel({
         rows={4}
       />
       <div className="pet-actions">
-        <button onClick={onCreateQuest}>
+        <button onClick={onCreateQuest} disabled={!bridgeReady}>
           <MessageSquare size={16} /> Send
         </button>
         <button className="secondary" onClick={onOpenHall}>
@@ -416,6 +507,7 @@ interface QuestBoardProps {
   onBoardAssignee: (value: string) => void;
   onCreateQuest: () => void;
   onSelectTask: (taskId: string) => void;
+  bridgeReady: boolean;
 }
 
 function QuestBoard({
@@ -436,6 +528,7 @@ function QuestBoard({
   onBoardAssignee,
   onCreateQuest,
   onSelectTask,
+  bridgeReady,
 }: QuestBoardProps) {
   return (
     <section className="board-layout">
@@ -474,7 +567,7 @@ function QuestBoard({
               </option>
             ))}
           </select>
-          <button onClick={onCreateQuest}>
+          <button onClick={onCreateQuest} disabled={!bridgeReady}>
             <Flag size={16} /> Create Quest
           </button>
         </div>

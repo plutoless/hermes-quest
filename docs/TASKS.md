@@ -54,3 +54,18 @@ Do not expand v0 scope. Deferred features must be recorded under Scope Guard in 
 - [x] T023 Update README with setup, run commands, and what is mocked.
 - [x] T024 Update `docs/EXECUTION_LOG.md` with final status, remaining gaps, and next recommended work.
 - [x] T025 Run available build/test/lint commands and record results.
+
+## Phase 6 — API-First Real Hermes Bridge
+
+- [x] T026 Create short `docs/HERMES_INTEGRATION_PLAN.md`.
+- [x] T027 Preserve the existing MockHermesBridge behavior.
+- [x] T028 Add a stable UI-facing bridge interface shared by mock and real bridges.
+- [x] T029 Add RealHermesBridge behind the same interface.
+- [x] T030 Add bridge factory selection for `mock`, `real`, and `auto`.
+- [x] T031 Add local config support for bridge mode and Hermes API base URL.
+- [x] T032 Route pet and Quest Board tasks through the selected bridge in real mode.
+- [x] T033 Capture Hermes API run output and convert it into a Quest Report Card.
+- [x] T034 Surface real Hermes API failures in pet state, task detail, timeline, and execution docs.
+- [x] T035 Show bridge mode / fallback status in the visible system strip.
+- [x] T036 Update README with mock / real / auto setup.
+- [x] T037 Run relevant build/test/lint verification.

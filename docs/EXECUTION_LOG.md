@@ -8,16 +8,18 @@ Use:
 - this file for current status, decisions, checkpoints, blockers, and remaining gaps
 
 ## Current Objective
-- Build the smallest runnable v0 loop: Pet -> Quest -> Timeline -> Report Card -> Review.
+- Replace the subprocess RealHermesBridge with an API-first Hermes bridge while preserving the existing mock bridge and v0 loop.
 
 ## Current Milestone
-- Phase 5 — Error / Polish / Handoff
+- Phase 6 — API-first Real Hermes Bridge
 
 ## Current Status
 - React v0 loop is implemented and runnable through Vite.
 - Tauri native shell launches on macOS with separate Guild Hall and Pet windows.
-- Hermes integration is mocked through the local bridge.
-- Codex Goal status: complete for the mock-first Hermes Guild v0 loop.
+- MockHermesBridge remains available.
+- RealHermesBridge is implemented as a Hermes API adapter behind the same UI-facing bridge interface.
+- Bridge factory supports `mock`, `real`, and `auto`; auto falls back to mock when real Hermes is unavailable.
+- Codex Goal status: active for API-first real Hermes integration.
 
 ## Decisions
 
@@ -60,6 +62,26 @@ Reason: Tauri `main` and `pet` windows run separate webviews, so the app singlet
 ### D010 — Enable macOS private API for transparent Pet Mode
 Status: accepted  
 Reason: Tauri requires `app.macOSPrivateApi` for transparent windows on macOS; the v0 pet window explicitly depends on transparency, undecorated chrome, and always-on-top behavior.
+
+### D011 — Minimal real bridge uses Hermes CLI one-shot
+Status: accepted  
+Reason: `hermes -z/--oneshot` is the least invasive available integration path for a first real adapter; it returns final stdout without requiring gateway, WebUI, memory UI, or session browser scope.
+
+### D012 — Bridge selection is local-config driven
+Status: accepted  
+Reason: `mock`, `real`, and `auto` modes need to be switchable without redesigning the v0 UI; local storage keeps the app runnable and lets users configure the Hermes API base URL.
+
+### D013 — Auto mode falls back to mock
+Status: accepted  
+Reason: Hermes availability can vary by machine and runtime; auto mode should preserve the v0 loop by using mock behavior when the real API path is unavailable.
+
+### D014 — Real bridge is API-first
+Status: accepted  
+Reason: Hermes Guild is a desktop workbench, not a CLI wrapper. Real mode should use the Hermes API server (`/health`, `/v1/runs`, and `/v1/runs/{run_id}/events`) instead of spawning Hermes subprocesses for normal task execution.
+
+### D015 — Pet window is not pinned above Guild Hall
+Status: accepted  
+Reason: Always-on-top makes the v0 pet obscure the main Guild Hall window. Pet Mode should be a separate movable companion window, not a modal overlay over the primary work surface.
 
 ## Checkpoints
 
@@ -1357,6 +1379,195 @@ Run the final native blocker verification from `main` at `ce50c1e Document Herme
 - Native verification passed for the v0 native shell gate.
 - Codex Goal complete for the mock-first Hermes Guild v0 loop.
 
+### 2026-05-04 01:30 CST — Minimal RealHermesBridge implemented
+
+#### Goal
+Add a minimal real Hermes integration while preserving the mock bridge and current pet -> quest -> timeline -> report card -> review loop.
+
+#### Changed
+- Added `docs/HERMES_INTEGRATION_PLAN.md` with a short implementation plan.
+- Added shared bridge types in `src/bridge/types.ts`.
+- Kept `MockHermesBridge` working behind the shared UI-facing bridge interface.
+- Added `RealHermesBridge` with `getHealth`, `listAgents`, `setActiveAgent`, `getActiveAgent`, `submitTask`, `getTask`, `reviseTask`, and `approveTask` methods.
+- Added `BridgeFactory` selection for `mock`, `real`, and `auto`.
+- Added local storage bridge config for `bridgeMode`, `hermesCommand`, and Guild agent to Hermes profile mapping.
+- Added a Tauri subprocess runner for Hermes CLI health and one-shot task execution.
+- Updated `useBridgeSnapshot` to load the configured bridge while keeping a mock initial snapshot.
+- Updated `README.md` with mock / real / auto setup.
+- Added Phase 6 tasks to `docs/TASKS.md`.
+
+#### Works
+- `mock` mode still uses MockHermesBridge.
+- `auto` mode checks real Hermes health and falls back to mock when the Tauri/native Hermes path is unavailable.
+- `real` mode creates Guild tasks locally, maps the Guild assignee to the configured Hermes profile, invokes Hermes CLI one-shot, captures final stdout, and turns it into a Quest Report Card.
+- Real bridge subprocess failures update the task error, active pet state, task timeline, and system strip instead of failing silently.
+- The visible system strip reports bridge mode and fallback status.
+
+#### Real
+- Hermes CLI availability detection through native Tauri command execution.
+- Hermes CLI one-shot subprocess invocation in native mode.
+- Final stdout capture.
+- Guild-generated Quest Report Card from real final output.
+- CLI failure surfacing through bridge state.
+
+#### Mocked / Derived
+- Live intermediate Hermes progress is derived locally because one-shot mode only returns final output.
+- Blocked state remains Guild-maintained; Hermes one-shot does not expose a live blocked signal.
+- Auto fallback uses the existing mock bridge when real health fails.
+- Pet position remains bridge-mocked.
+
+#### Tested
+- `bun test src/bridge/bridgeFactory.test.ts`: passed; 6 tests / 18 assertions.
+- `bun run test`: passed after the bridge additions; 30 tests / 115 assertions.
+- `bun run lint`: passed after fixing the Tauri invoke argument shape.
+- `bun run verify:web`: passed; Tauri config check, TypeScript, 30 tests / 115 assertions, and Vite production build passed.
+- `cargo fmt --check`: passed after formatting the new Tauri command handlers.
+- `cargo check` in `src-tauri`: passed with the new Hermes subprocess commands.
+- `bun run tauri:dev`: passed native compile and launched `target/debug/hermes-guild`; `curl -I http://127.0.0.1:1420/` returned HTTP 200 during the run.
+- `/Users/plutoless/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main --version`: passed and reported Hermes Agent v0.11.0.
+
+#### Blockers
+- Real-mode end-to-end model execution was not submitted in this checkpoint to avoid consuming provider credits or transmitting a generated task prompt; it requires launching the native Tauri app with a valid `hermesCommand` and configured provider credentials.
+- Browser-only dev mode cannot run real Hermes; it reports unavailable Tauri runtime and auto-falls back to mock.
+
+#### Next
+- Run the full web verification suite after final docs and implementation edits.
+- Run native `bun run tauri:dev` to compile the new Tauri commands.
+- If configured credentials are available, submit a small real-mode pet task and inspect the returned Quest Report Card.
+
+### 2026-05-04 01:45 CST — Real bridge repair pass
+
+#### Goal
+Repair the parts of the RealHermesBridge implementation that could make real mode look or behave like mock mode, then validate locally.
+
+#### Broken
+- The app initialized with a live `MockHermesBridge` while async bridge config selection was still loading; a fast pet or Quest Board submit could use mock even when `real` was configured.
+- Bridge status was compressed into `logsSummary`, so mode, active implementation, Hermes availability, and fallback reason were not independently visible.
+- Real-mode agents used the same fantasy mock names (`Lyra`, `Brass`, `Sable`), making real mode appear like mock data.
+- Real-mode Hermes health failure used the simulated error path, which hid the actual health failure reason.
+
+#### Fixed
+- Added structured bridge status to `SystemStatus`: `bridgeMode`, `activeImplementation`, `hermesAvailable`, `fallbackReason`, and `hermesCommand`.
+- Added an explicit loading bridge snapshot; task submission is disabled until bridge selection finishes, so initial UI state cannot silently submit to mock.
+- Updated Pet and Quest Board submission to call the selected bridge's `submitTask` path when available.
+- Real mode now uses `Hermes Researcher`, `Hermes Builder`, and `Hermes Reviewer` labels instead of mock profile names.
+- Real mode never falls back to mock; failed health checks keep `activeImplementation: real`, mark Hermes unavailable, surface the real failure reason, and set the active agent to error.
+- Auto mode remains the only path that falls back to mock, with `fallbackReason` visible in the system strip.
+- Mock mode and auto fallback keep mock data clearly labeled through bridge status and warnings.
+
+#### Still Mocked / Derived
+- Mock mode and auto fallback still use MockHermesBridge lifecycle, artifacts, report content, blocked state, and provider errors.
+- Real bridge still derives intermediate progress locally around Hermes one-shot execution.
+- Real blocked state is still Guild-maintained because one-shot execution does not expose a live blocked signal.
+
+#### Validation
+- Added failing tests first for structured bridge status, auto fallback visibility, real-mode no-fallback behavior, real labels, mapped-profile task submission, and real failure surfacing.
+- `bun test src/bridge/bridgeFactory.test.ts`: passed after repair; 7 tests / 40 assertions.
+- `bun run verify:web`: passed; Tauri config check, TypeScript, 31 tests / 136 assertions, and Vite production build passed.
+- `cargo fmt --check`: passed.
+- `cargo check` in `src-tauri`: passed.
+- `bun run tauri:dev`: passed native compile and launched `target/debug/hermes-guild`.
+- `curl -I http://127.0.0.1:1420/`: returned HTTP 200 during the native run.
+- `/Users/plutoless/.hermes/hermes-agent/venv/bin/python -m hermes_cli.main --version`: passed and reported Hermes Agent v0.11.0.
+- Native dev processes were stopped after validation.
+
+#### Result
+- Repair validation passed for the minimal RealHermesBridge gate.
+- Real-mode live model task submission remains intentionally unrun to avoid provider credits and prompt transmission without explicit confirmation.
+
+### 2026-05-04 02:07 CST — Bridge selector added
+
+#### Goal
+Make bridge mode selection available in the app instead of requiring devtools local storage edits.
+
+#### Changed
+- Added compact bridge controls to the top system strip: mode selector, Hermes command field, Apply button, and profile mapping disclosure.
+- Updated `useBridgeSnapshot()` so Apply saves bridge config and rebuilds the selected bridge immediately.
+- Kept task submission disabled while a new bridge is loading.
+- Updated `README.md` to describe the in-app selector.
+
+#### Works
+- Users can switch `mock`, `auto`, and `real` from Guild Hall without opening devtools.
+- `real` mode still fails visibly when Hermes cannot run; it does not fall back to mock.
+- `auto` remains the only mode that can fall back to mock.
+
+#### Still Mocked / Derived
+- Browser-only dev mode still cannot execute real Hermes because Tauri commands are unavailable.
+- Auto fallback still uses MockHermesBridge when health checks fail.
+
+#### Validation
+- `bun run lint`: passed.
+- `bun run verify:web`: passed; Tauri config check, TypeScript, 31 tests / 136 assertions, and Vite production build passed.
+- `bun run dev -- --port 1422`: launched Vite at `http://127.0.0.1:1422/` because `1420` was already occupied.
+- `curl -I http://127.0.0.1:1422/`: returned HTTP 200.
+
+### 2026-05-04 02:35 CST — Real bridge switched to Hermes API
+
+#### Goal
+Replace the normal real bridge subprocess path with the Hermes API server.
+
+#### Researched
+- Primary local source: `/Users/plutoless/.hermes/hermes-agent/gateway/platforms/api_server.py`.
+- `GET /health` returns JSON with `status` and `platform`.
+- `POST /v1/runs` accepts `input`, optional `instructions`, optional `previous_response_id`, optional `conversation_history`, and optional `session_id`; it returns `202` with `run_id` and `status`.
+- `GET /v1/runs/{run_id}/events` returns SSE blocks with `data: {...}` payloads. Useful events include `message.delta`, `tool.started`, `tool.completed`, `reasoning.available`, `run.completed`, and `run.failed`.
+- `/v1/runs` does not expose a Hermes profile parameter, so Guild profile mapping is not sent.
+- Fallback endpoints exist (`/v1/chat/completions`, `/v1/responses`), but the bridge uses `/v1/runs` first because it exposes structured lifecycle events.
+
+#### Changed
+- Replaced `hermesCommand` bridge config with `hermesApiBaseUrl`, defaulting to `http://127.0.0.1:8642`.
+- Added `src/bridge/hermesApiClient.ts` for API health checks, `/v1/runs` submission, SSE parsing, and API error extraction.
+- Refactored `RealHermesBridge` to use the API client instead of a Tauri subprocess runner.
+- Removed the normal Tauri subprocess command module and Rust invoke handlers.
+- Updated the top system strip bridge control from command input to API base URL input.
+- Updated `README.md`, `docs/HERMES_INTEGRATION_PLAN.md`, and `docs/COMPLETION_AUDIT.md` to describe the API-first bridge.
+
+#### Works
+- `real` mode checks Hermes availability through API health.
+- `real` mode submits Pet and Quest Board tasks through the Hermes API client.
+- `real` mode never falls back to mock; API health or run failures surface in task, pet, timeline, and system status.
+- `auto` mode remains the only path that may fall back to mock, with the API failure reason visible.
+- Browser/Vite and Tauri/native both use HTTP fetch for real mode. CORS or network failures surface through health/run error messages.
+
+#### Still Mocked / Derived
+- Mock mode and auto fallback still use MockHermesBridge lifecycle, artifacts, report content, blocked state, and provider errors.
+- Guild role assignment remains Guild-owned; the Hermes API currently does not expose profile selection on `/v1/runs`.
+- Blocked state remains Guild-maintained because `/v1/runs` events do not expose a stable blocked signal.
+- Real task artifacts are still Guild-generated from final API output.
+
+#### Validation
+- Added failing tests first for API config, API health, real no-fallback behavior, auto fallback visibility, API task submission, API failure surfacing, and removal of subprocess language from normal real logs.
+- `bun test src/bridge/bridgeFactory.test.ts`: passed after implementation; 8 tests / 46 assertions.
+- `bun run verify:web`: passed; Tauri config check, TypeScript, 32 tests / 142 assertions, and Vite production build passed.
+- `cargo fmt --check`: passed.
+- `cargo check` in `src-tauri`: passed after removing subprocess invoke handlers.
+- `curl -sS http://127.0.0.1:8642/health`: failed to connect, indicating no local Hermes API server was running during this pass; no model task was submitted.
+- Stopped the previously running Vite dev server on port `1422`.
+
+### 2026-05-04 02:12 CST — Native pet window stacking and drag fixed
+
+#### Goal
+Stop the native Pet Mode window from covering the Guild Hall window and make the undecorated pet window movable.
+
+#### Root Cause
+- `src-tauri/tauri.conf.json` set the `pet` window `alwaysOnTop` flag to `true`.
+- `scripts/check-tauri-config.mjs` enforced that always-on-top behavior as a v0 expectation.
+- Pet dragging relied only on `data-tauri-drag-region`; the app did not explicitly call Tauri's `startDragging()` window API or declare the corresponding capability.
+
+#### Changed
+- Set the native `pet` window `alwaysOnTop` flag to `false`.
+- Updated the Tauri config checker to require the pet window not be pinned always-on-top.
+- Added `startPetWindowDrag()` using `@tauri-apps/api/window.getCurrentWindow().startDragging()`.
+- Wired the drag handler only for the actual `/?mode=pet` window, not the embedded pet panel in Guild Hall.
+- Added `src-tauri/capabilities/default.json` with `core:window:allow-start-dragging` plus the existing window focus/show permissions needed by the Hall button.
+
+#### Validation
+- `bun run verify:web`: passed; Tauri config check, TypeScript, 32 tests / 142 assertions, and Vite production build passed.
+- `cargo fmt --check`: passed.
+- `cargo check` in `src-tauri`: passed.
+- `bun run tauri:dev`: compiled and launched `target/debug/hermes-guild` with the updated config.
+- Stopped the Tauri dev process and Vite dev server after the native launch check.
+
 ## Scope Guard
 Deferred:
 - multiple pets
@@ -1367,12 +1578,12 @@ Deferred:
 - Skill Deck
 - Infirmary
 - voice input
-- full Hermes integration
+- full Hermes WebUI parity, gateway UI, memory UI, skill management, workspace browser, and multi-agent orchestration
 
 ## Remaining Gaps
 - Pet position persistence is bridge-mocked, not native-persisted.
-- Hermes integration notes are deferred until real Hermes integration: `docs/HERMES_NOTES.md` and `docs/HERMES_WEBUI_ANALYSIS.md`.
-- Hermes runtime execution, artifacts, provider errors, and profile availability are mocked.
+- Hermes integration notes for deeper runtime/WebUI parity remain deferred: `docs/HERMES_NOTES.md` and `docs/HERMES_WEBUI_ANALYSIS.md`.
+- Live Hermes progress is limited to selected `/v1/runs` SSE events; artifacts beyond final API output, provider health details, and profile availability are minimal or derived in the real bridge.
 - Direct native webview content introspection remains limited by desktop automation access.
 - Completion audit is documented in `docs/COMPLETION_AUDIT.md`.
 - Native verification handoff is documented in `docs/NATIVE_VERIFICATION.md`.

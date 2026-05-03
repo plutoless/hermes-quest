@@ -7,6 +7,7 @@ const cargoToml = readFileSync('src-tauri/Cargo.toml', 'utf8');
 const nativeLib = readFileSync('src-tauri/src/lib.rs', 'utf8');
 const nativeMain = readFileSync('src-tauri/src/main.rs', 'utf8');
 const nativeBuild = readFileSync('src-tauri/build.rs', 'utf8');
+const defaultCapability = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf8'));
 const windowProperties = schema.definitions?.WindowConfig?.properties ?? {};
 const requiredWindowKeys = ['label', 'title', 'width', 'height', 'resizable', 'decorations'];
 const requiredPetKeys = ['url', 'transparent', 'alwaysOnTop'];
@@ -66,12 +67,16 @@ if (petWindow.url !== '/?mode=pet') {
   fail('pet window must load /?mode=pet');
 }
 
-if (petWindow.decorations !== false || petWindow.transparent !== true || petWindow.alwaysOnTop !== true) {
-  fail('pet window must be undecorated, transparent, and always on top');
+if (petWindow.decorations !== false || petWindow.transparent !== true || petWindow.alwaysOnTop !== false) {
+  fail('pet window must be undecorated, transparent, and not pinned always on top');
 }
 
 if (petWindow.transparent === true && config.app.macOSPrivateApi !== true) {
   fail('transparent pet window requires app.macOSPrivateApi on macOS');
+}
+
+if (!defaultCapability.permissions?.includes('core:window:allow-start-dragging')) {
+  fail('default capability must allow start-dragging for the undecorated pet window');
 }
 
 const requiredCargoFragments = [
