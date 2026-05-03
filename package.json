@@ -1,0 +1,31 @@
+{
+  "name": "hermes-guild",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "lint": "tsc -b --pretty false",
+    "test": "bun test",
+    "check:tauri-config": "node scripts/check-tauri-config.mjs",
+    "verify:web": "bun run check:tauri-config && bun run lint && bun run test && bun run build",
+    "check:native": "bash scripts/check-native-prereqs.sh",
+    "preview": "vite preview --host 127.0.0.1",
+    "tauri:dev": "tauri dev"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12",
+    "@tauri-apps/api": "^2.8.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.8.4",
+    "@vitejs/plugin-react": "^5.0.4",
+    "@types/react": "^19.2.2",
+    "@types/react-dom": "^19.2.2"
+  }
+}

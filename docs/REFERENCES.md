@@ -10,7 +10,7 @@ The product shape is:
 desktop pet as task entry + guild hall as quest/review workbench
 ```
 
-Before implementation, read these references and produce the required notes files listed below. Product code should not start until the implementation plan has reconciled these references with `docs/DESIGN.md`.
+Before implementation, read these references enough to reconcile them with `docs/DESIGN.md`, but keep reference analysis time-boxed. Notes should be short, action-oriented, and only capture implementation decisions or unknowns that affect the first vertical slice. Do not spend more than one implementation pass on reference analysis before starting the Tauri pet shell spike. Do not spend the Goal session completing all optional reference notes before implementation; reference notes should unblock implementation, not replace it.
 
 ## 0. Primary Product Spec
 
@@ -96,7 +96,7 @@ Do not simply wrap the Hermes CLI in a prettier terminal.
 
 Hermes Guild is not a CLI clone. It is a task/quest workbench where Hermes profiles become assignable agents with reviewable outputs.
 
-### Required output after reading
+### Required v0 output after reading
 
 Create or update:
 
@@ -186,7 +186,7 @@ profile/model controls
 no fork requirement
 ```
 
-### Required output after reading
+### Required v0 output after reading
 
 Create or update:
 
@@ -277,7 +277,7 @@ SP001 — Tauri pet shell spike
 
 Transparent desktop windows and click-through behavior can be platform-sensitive. Do not assume macOS, Windows, and Linux behave the same. The first implementation task must verify this on target platforms before building complex pet behavior.
 
-### Required output after reading
+### Required v0 output after reading
 
 Create:
 
@@ -348,7 +348,7 @@ Error
 
 Do not add random pet behaviors unless they communicate work state.
 
-### Required output after reading
+### Optional output after reading
 
 Create:
 
@@ -420,7 +420,7 @@ chat sidebar
 linear clone
 ```
 
-### Required output after reading
+### Optional output after reading
 
 Create:
 
@@ -448,24 +448,32 @@ Template:
 
 ## Required Pre-Implementation Docs
 
-Before product implementation, create or update these planning files:
+Before product UI coding, only these files are mandatory:
+
+```text
+docs/TAURI_SPIKE_PLAN.md
+docs/API_CONTRACT.md
+docs/PRD.md
+docs/TASKS.md
+docs/EXECUTION_LOG.md
+```
+
+Before real Hermes integration, create or update:
 
 ```text
 docs/HERMES_NOTES.md
 docs/HERMES_WEBUI_ANALYSIS.md
-docs/TAURI_SPIKE_PLAN.md
-docs/PET_REFERENCES.md
-docs/AGENT_WORKBENCH_REFERENCES.md
-docs/API_CONTRACT.md
-docs/TASKS.md
-docs/DECISIONS.md
 ```
+
+Other reference notes, including `docs/PET_REFERENCES.md` and `docs/AGENT_WORKBENCH_REFERENCES.md`, are optional. Create them only when they unblock a concrete implementation choice.
 
 `docs/API_CONTRACT.md` should define the first Hermes Bridge interface before UI components depend on runtime details.
 
-`docs/TASKS.md` should break implementation into small vertical slices, starting with the Tauri pet shell spike and mock bridge.
+`docs/PRD.md` should keep the stable product goal, v0 scope, and acceptance criteria short enough for long-horizon Goal execution.
 
-`docs/DECISIONS.md` should record scope decisions, especially anything deferred to v0.5.
+`docs/TASKS.md` should be the Codex Goal milestone plan. Use checkboxes and keep each task small enough to finish, validate, and log while still allowing continuous milestone execution.
+
+`docs/EXECUTION_LOG.md` should record status checkpoints and important scope decisions, especially anything deferred to v0.5.
 
 ## Reference Priority
 

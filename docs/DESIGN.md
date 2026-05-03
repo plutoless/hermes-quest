@@ -147,7 +147,8 @@ Features that do not prove this loop should be optional or deferred.
 - Agent cards with role, traits, basic skills, current status, and current task.
 - Quest Board with create task, task list, task detail, and direct assignment.
 - Task detail with brief, assignee, lifecycle state, progress notes, artifacts, errors, and timeline.
-- Task states: idle, thinking, running, blocked, needs_review, error, and approved.
+- Task states: created, assigned, running, blocked, needs_review, approved, and error.
+- Pet states: idle, thinking, running, blocked, needs_review, and error.
 - Quest Report Card generation for completed tasks.
 - Review panel with completed deliverables, facts, assumptions, known gaps, approve, and revise.
 - Error visibility shared by the pet and task detail.

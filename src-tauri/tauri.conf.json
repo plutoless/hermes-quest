@@ -1,0 +1,35 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Hermes Guild",
+  "version": "0.1.0",
+  "identifier": "quest.hermes.guild",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "bun run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Hermes Guild",
+        "width": 1280,
+        "height": 820,
+        "resizable": true,
+        "decorations": true
+      },
+      {
+        "label": "pet",
+        "title": "Hermes Pet",
+        "url": "/?mode=pet",
+        "width": 360,
+        "height": 520,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true
+      }
+    ]
+  }
+}
