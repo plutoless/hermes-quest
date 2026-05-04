@@ -1,156 +1,106 @@
-# Pet Mode Lightweight Overlay Polish Spec
+# Real Hermes Pet Profile And Output Grounding Spec
 
 ## Goal
 
-Refine Hermes Guild Pet Mode so the pet character remains the main visual anchor and the expanded chat becomes a lightweight transparent speech-bubble overlay.
+Fix two real-mode Pet Mode issues:
 
-The current Pet Mode behavior is directionally correct: collapsed mode is character-first, clicking opens chat, Send stays in Pet Mode, and Hermes/agent responses can appear as message bubbles.
+- Pet Mode should show the real active Hermes profile name instead of the hardcoded `Hermes Builder` label.
+- Pet Mode message bubbles should only reflect meaningful Hermes-returned output or concise errors, not bridge-authored operational narration such as `Started Hermes API run.`
 
-This pass is visual and interaction polish for the floating Pet Mode surface. It should remove the remaining heavy panel feeling without changing the product loop or bridge behavior.
+This pass is a bridge and message-selection fix. It is not a Pet Mode visual redesign.
 
 ## User-Approved Requirements
 
-- The pet character remains the main visual anchor.
-- Chat should appear as a lightweight transparent speech bubble / overlay.
-- Remove the heavy parchment panel background around the whole floating chat area.
-- Do not make the floating UI look like a mini chat app or mini dashboard.
-- Input should be lightweight and overlay-style, not embedded in a large panel.
-- Actions like Review / Open / Progress / Issue should be small chips or lightweight action buttons, not big block buttons.
+- Remove unnecessary Pet Mode agent text that comes from Guild/bridge lifecycle narration.
+- Pet Mode should not display strings like `Started Hermes API run.`, `Hermes API streamed response text.`, or `Hermes API run completed.` as if Hermes said them.
+- Pet Mode should show the actual text Hermes returned when a real run produces output.
+- Pet Mode should show the real Hermes profile name.
+- The real Hermes profile name must come from Hermes API profile metadata, such as `profile.name`, `active_profile.name`, `profile_name`, or equivalent health metadata.
+- The current local Hermes API does not expose profile identity through `/health`; `/v1/profile`, `/v1/profiles`, and `/v1/agents` return 404.
+- If API profile metadata is unavailable, the real-mode label should be `Profile unavailable`, not `Hermes Builder`, `Hermes profile`, or a manually configured name.
 
 ## Current Reality
 
-Pet Mode currently has:
+Real mode currently seeds a fixed Guild role roster:
 
-- transparent character-first collapsed state
-- click-to-open expanded chat
-- user and Hermes/agent message bubbles
-- Send behavior that stays in Pet Mode
-- best-available Hermes/bridge response bubbles from timeline/report/output sources
-- explicit handoff actions for deeper workflows
+- `Hermes Researcher`
+- `Hermes Builder`
+- `Hermes Reviewer`
 
-The remaining problem is that the opened chat surface still has too much full-panel visual weight. It can read as a floating parchment card or compact mini app instead of a light speech-bubble overlay around the pet.
+The active profile defaults to `builder`, so Pet Mode can show `Hermes Builder` even when the real Hermes runtime is a different local profile.
+
+Real mode also creates synthetic timeline entries such as:
+
+- `Started Hermes API run.`
+- `Hermes API streamed response text.`
+- `Hermes API run completed.`
+- `Captured final Hermes output as a review artifact.`
+
+Pet Mode derives response bubbles from task timeline/report data, so these internal lifecycle strings can appear as companion speech. That makes the pet feel noisy and less truthful.
+
+Local API probe on 2026-05-05:
+
+```text
+GET /health -> {"status":"ok","platform":"hermes-agent"}
+GET /v1/profile -> 404
+GET /v1/profiles -> 404
+GET /v1/agents -> 404
+```
 
 ## Scope
 
 In scope:
 
-- Pet Mode expanded chat visual structure.
-- Pet Mode CSS and small component markup changes where needed.
-- Lightweight speech-bubble / overlay treatment.
-- Lightweight overlay-style input.
-- Small chip-style handoff actions.
-- Screenshot/manual validation for collapsed, expanded, post-send, and report-output states.
-- Validation and execution log updates.
+- Optional parsing of real profile metadata from future Hermes health responses.
+- Real bridge active agent naming.
+- Removal or filtering of Pet Mode synthetic bridge narration.
+- Tests for config parsing, metadata parsing, real profile labels, and real output cleanliness.
+- API contract and execution log updates.
 
 Out of scope:
 
+- Multiple real Hermes profiles.
+- Unsupported `/v1/runs` profile-routing parameters.
 - Guild Hall redesign.
-- Quest Board redesign.
-- Review Chamber redesign.
-- Broad Pixel UI Kit redesign.
-- New character art, regenerated avatars, or sprite sheets.
-- Bridge rewrite.
-- Persistent long-term chat history.
-- Full chat app behavior.
-- Full dashboard/status panel inside Pet Mode.
-- Full review workflow inside Pet Mode.
-- Diagnostics/settings inside Pet Mode.
-- Multiple pets.
-- Voice input.
-- Fake RPG stats, XP, levels, or game systems.
+- Pet Mode visual redesign.
+- Mock profile renaming.
+- New Hermes API endpoints.
+- Tavern, Skill Deck, Infirmary, XP, levels, or unrelated RPG systems.
 
 ## User-Visible Behavior
 
-### Collapsed Pet
+### Real Profile Name
 
-Preserve current behavior:
+In real mode:
 
-- transparent desktop pet
-- character-first
-- no input visible by default
-- no panel/card/dashboard visible by default
-- click opens chat
-- explicit handoff can open Guild Hall
+- Legacy/manual `realProfileName` config is ignored for speaker identity.
+- If Hermes `/health` exposes profile metadata, the bridge uses that as the companion name.
+- If API profile metadata is absent, Pet Mode shows `Profile unavailable`.
+- Pet Mode must not show `Hermes Builder` or `Hermes profile` as the real-mode fallback.
 
-### Expanded Pet Chat
+Bridge settings should keep bridge mode/base configuration only; they must not expose a manual field that can spoof the active Hermes profile name.
 
-Clicking the pet opens a compact overlay near the character.
+### Pet Messages
 
-The expanded surface should feel like:
+Pet Mode should show:
 
-- transparent or near-transparent speech-bubble UI
-- light enough that the character remains dominant
-- anchored to the pet
-- compact message bubbles
-- compact overlay input
-- small action chips
+- user-submitted text
+- actual returned Hermes output
+- Hermes-provided progress text when the event includes meaningful `text`, `preview`, or `delta`
+- concise errors
 
-It should not feel like:
+Pet Mode should not show:
 
-- a parchment card around the whole chat area
-- a mini chat application
-- a mini dashboard
-- a status panel
-- a form widget
-- a report card
-- a reduced Guild Hall
+- app-authored greeting text
+- accepted/sending status bubbles such as `I am sending...` or `Quest accepted...`
+- report wrapper text such as `Returned output:`
+- bridge lifecycle narration
+- run-start/run-complete labels
+- artifact-capture labels
+- assignment/routing labels
+- long diagnostics or stack traces
 
-Opening the chat must not move, push, resize, or recenter the pet character.
-
-### Message Bubbles
-
-Preserve the existing message behavior:
-
-- user messages appear as user bubbles
-- Hermes/agent messages appear as agent bubbles
-- Send appends the user message
-- Send keeps the user in Pet Mode
-- Send does not automatically open Guild Hall or Quest Board
-- Hermes/agent response bubble appears after Send
-- progress/final-response bubbles can appear when available
-
-The visual treatment should be lighter than a panel. Individual bubbles can use subtle translucent fills, small borders, or soft pixel accents, but the entire chat area should not sit inside a heavy parchment frame.
-
-### Input
-
-The input should feel like a lightweight overlay command control:
-
-- compact
-- visually subordinate to the pet and message bubbles
-- no large enclosing panel
-- no heavy block button treatment
-- clear focus state
-- Send remains obvious
-
-### Actions
-
-Review / Open / Progress / Issue actions should appear as:
-
-- small chips
-- tiny command buttons
-- icon+text links
-- lightweight action pills
-
-They should not appear as large block buttons or dominate the floating widget.
-
-Deep workflows still open the main app.
-
-## Preservation Requirements
-
-Do not break:
-
-- transparent character-first collapsed Pet Mode
-- current character identity and avatar assets
-- AvatarFrame alignment
-- current message bubble behavior after Send
-- staying in Pet Mode after Send
-- Hermes/agent response bubbles
-- final output/report excerpts when available
-- RealHermes bridge
-- mock / real / auto modes
-- pet submit flow
-- approve / revise flow
-- Hall/Pet native switching behavior
+Task detail timelines may still contain Guild-owned lifecycle records where useful, but Pet chat bubbles must not present those records as Hermes speech.
 
 ## Likely Files And Systems
 
@@ -158,82 +108,89 @@ Read first:
 
 - `SPEC.md`
 - `GOAL.md`
-- `docs/PET_MODE_REDESIGN.md`
+- `docs/superpowers/plans/2026-05-05-real-hermes-pet-profile-output.md`
 - `AGENTS.md`
 - `src/App.tsx`
-- `src/styles.css`
 - `src/types.ts`
-- `src/bridge/mockHermesBridge.ts`
+- `src/bridge/types.ts`
+- `src/bridge/bridgeFactory.ts`
+- `src/bridge/bridgeFactory.test.ts`
+- `src/bridge/hermesApiClient.ts`
+- `src/bridge/hermesApiClient.test.ts`
 - `src/bridge/realHermesBridge.ts`
-- `src/ui/pixel/index.tsx`
-- `src-tauri/tauri.conf.json`
-- `src-tauri/src/lib.rs`
+- `docs/API_CONTRACT.md`
+- `docs/EXECUTION_LOG.md`
 - `package.json`
 
 Useful discovery commands:
 
 ```bash
-rg "PetPanel|pet-chat|pet-message|pet-handoff|pet-window|createPetQuest" src
-rg "mode=pet|show_hall_window|show_pet_window|tray|WindowEvent" src src-tauri
+rg "Hermes Builder|Started Hermes API run|Hermes API streamed|Hermes API run completed|realProfileName" src docs README.md
+rg "getPetAgentResponse|latestUsefulEvent|BridgeConfig|healthFromHttpResponse|RealHermesBridge" src
 ```
 
 ## Implementation Notes
 
-- Prefer CSS/markup refinement over behavior rewrites.
-- Keep the pet character positioned as the anchor.
-- Remove or soften any wrapper that reads as a whole-card parchment panel.
-- Use translucent speech-bubble layering for the chat area.
-- Use small action chips instead of `PixelButton` block treatment if the current button styling feels too heavy.
-- Keep raw bridge diagnostics out of Pet Mode.
-- Keep text readable even with a lighter overlay.
+- Do not add a manual `BridgeConfig.realProfileName` identity path.
+- Do not claim real profile routing; current `/v1/runs` does not expose a profile parameter.
+- Keep unsupported routing truth visible in docs, but do not surface it as chatty Pet Mode speech.
+- Use API profile metadata when available, otherwise `Profile unavailable`.
+- Preserve mock/auto/real modes and existing submit/review flows.
+- Preserve unrelated user changes in `src/App.tsx` and `src/styles.css`.
 
 ## Edge Cases
 
-- If many messages exist, keep the latest few visible without turning the overlay into a tall chat window.
-- If output is long, continue truncating to a concise excerpt.
-- If there is an error, show a short safe bubble and a lightweight Issue/Open chip.
-- If the viewport/native pet window is constrained, prefer smaller bubbles and internal scrolling over pushing the pet character.
-- If a visual treatment looks good in browser but fails on transparent native window, favor the native-window result.
+- If Hermes health exposes malformed profile metadata, ignore it and use the next fallback.
+- If a run returns no output, do not create a Pet agent output bubble from lifecycle narration.
+- If a run fails, show the concise Hermes error text.
+- If multiple timeline entries exist, Pet Mode should choose the latest meaningful Hermes-returned text or final report output.
 
 ## Verification
 
-Run available automated validation:
+Focused tests:
+
+```bash
+bun test src/bridge/hermesApiClient.test.ts
+bun test src/bridge/bridgeFactory.test.ts
+```
+
+Full web validation:
 
 ```bash
 bun run verify:web
+```
+
+Native validation where available:
+
+```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo check
 ```
 
-Manual/browser validation:
+Manual real-mode check with a running Hermes API server:
 
-- `/?mode=pet&variant=skyship-command-deck` for collapsed Pet Mode.
-- `/?mode=pet&variant=skyship-command-deck&pet=expanded` for opened overlay.
-- Post-send state showing user bubble and Hermes/agent response bubble.
-- Completed/report state showing useful output excerpt.
-
-Native validation where feasible:
-
-- native startup shows only the transparent pet window.
-- opening Hall hides Pet.
-- minimizing or closing/hiding Hall shows Pet again.
-- expanded chat overlay does not become a heavy panel on the native transparent window.
+- Open `/?mode=pet&variant=skyship-command-deck&pet=expanded`.
+- Send a Pet Mode message in real mode.
+- Confirm the input starts empty and is focused when expanded.
+- Confirm the speaker label uses API profile metadata when present, or `Profile unavailable` when absent.
+- Confirm the returned bubble contains raw Hermes output without a `Returned output:` prefix.
+- Confirm the pet does not show `Started Hermes API run.`, `Hermes API streamed response text.`, or `Hermes API run completed.`
 
 ## Done When
 
 This task is done only when all of the following are true:
 
-- `/?mode=pet&variant=skyship-command-deck` still shows character-first transparent Pet Mode.
-- Clicking the pet opens chat without moving, pushing, resizing, or recentering the character.
-- Expanded chat no longer has a heavy parchment panel around the whole floating area.
-- Chat appears as lightweight speech bubble / transparent overlay UI.
-- The floating UI does not look like a mini chat app, mini dashboard, status card, or form panel.
-- Input appears as a lightweight overlay command control.
-- Review / Open / Progress / Issue actions are small chips or lightweight buttons, not big block buttons.
-- User and Hermes/agent message bubbles remain distinct.
-- Send stays in Pet Mode and does not open Hall or Quest Board.
-- Hermes/agent response bubble still appears after Send.
-- Final output/report excerpt still appears when available.
-- RealHermes bridge, mock/real/auto modes, submit flow, and approve/revise flow remain intact.
-- `docs/EXECUTION_LOG.md` records changes, screenshots/manual checks, validation commands, and remaining gaps.
-- `bun run verify:web`, `cargo fmt --check`, and `cargo check` pass, or failures are documented exactly.
+- Future `/health` profile metadata can be parsed and used when configured name is absent.
+- Real mode ignores legacy/manual `realProfileName`.
+- Real mode falls back to `Profile unavailable`, not `Hermes Builder` or `Hermes profile`.
+- Pet input starts empty and focuses when expanded.
+- Pet Mode no longer displays app-authored greeting, sending, accepted, report-ready, or `Returned output:` wrapper text.
+- Pet Mode no longer displays synthetic run lifecycle narration as agent speech.
+- Pet Mode still displays actual Hermes returned output after completion.
+- Pet Mode still displays concise real Hermes errors.
+- Mock mode profile names and mock lifecycle behavior remain intact.
+- Auto fallback behavior remains intact.
+- `docs/API_CONTRACT.md` documents pet-visible message selection and real profile naming.
+- `docs/EXECUTION_LOG.md` records implementation evidence and remaining API metadata gaps.
+- `bun test src/bridge/hermesApiClient.test.ts`, `bun test src/bridge/bridgeFactory.test.ts`, and `bun run verify:web` pass.
+- `cargo fmt --check` and `cargo check` pass where native prerequisites are available, or exact blockers are documented.

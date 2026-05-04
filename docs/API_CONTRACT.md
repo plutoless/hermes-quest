@@ -18,6 +18,7 @@ This contract defines the first mock Hermes Bridge surface. UI components should
 - `health`: coarse bridge-derived health label.
 - `equipment`: configured model/tool/workspace summary.
 - `lastReportId`: most recent report card id, if any.
+- In real mode, `name` must come from Hermes API profile metadata when available. If `/health` does not provide profile metadata, use the explicit missing state `Profile unavailable`; do not use a manual profile-name config or a Guild role preset as the profile name.
 
 ### Task
 
@@ -47,6 +48,17 @@ This contract defines the first mock Hermes Bridge surface. UI components should
 - `message`: human-readable event text.
 - `timestamp`: ISO timestamp.
 - `source`: `guild`, `bridge`, or `hermes`.
+
+### Pet-Visible Message Selection
+
+Pet Mode is not a raw timeline renderer. It may use task timeline and report data as inputs, but pet chat bubbles should only show:
+
+- user-submitted text
+- actual Hermes returned output
+- Hermes-provided progress text when an event includes text, preview, or delta content
+- concise error text
+
+Pet Mode should not show app-authored greeting, sending, accepted, report-ready, report-wrapper, or bridge lifecycle narration such as run-start, run-complete, artifact-capture, or routing labels as if the active profile said them.
 
 ### Artifact
 

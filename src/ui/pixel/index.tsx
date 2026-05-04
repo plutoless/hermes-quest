@@ -1,4 +1,4 @@
-import type { ButtonHTMLAttributes, CSSProperties, ChangeEvent, ReactNode } from 'react';
+import type { ButtonHTMLAttributes, CSSProperties, ChangeEvent, Ref, ReactNode } from 'react';
 
 type PixelTone = 'primary' | 'secondary' | 'success' | 'danger' | 'ghost';
 type PixelIconName =
@@ -128,9 +128,10 @@ export interface PixelInputProps {
   multiline?: boolean;
   rows?: number;
   className?: string;
+  inputRef?: Ref<HTMLInputElement | HTMLTextAreaElement>;
 }
 
-export function PixelInput({ value, onChange, placeholder, ariaLabel, multiline = false, rows = 2, className = '' }: PixelInputProps) {
+export function PixelInput({ value, onChange, placeholder, ariaLabel, multiline = false, rows = 2, className = '', inputRef }: PixelInputProps) {
   const handleChange = (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.target.value);
 
   if (multiline) {
@@ -142,6 +143,7 @@ export function PixelInput({ value, onChange, placeholder, ariaLabel, multiline 
         placeholder={placeholder}
         aria-label={ariaLabel}
         rows={rows}
+        ref={inputRef as Ref<HTMLTextAreaElement>}
       />
     );
   }
@@ -151,10 +153,11 @@ export function PixelInput({ value, onChange, placeholder, ariaLabel, multiline 
       className={`pixel-input ${className}`.trim()}
       value={value}
       onChange={handleChange}
-      placeholder={placeholder}
-      aria-label={ariaLabel}
-    />
-  );
+    placeholder={placeholder}
+    aria-label={ariaLabel}
+    ref={inputRef as Ref<HTMLInputElement>}
+  />
+);
 }
 
 export function PixelTextarea(props: Omit<PixelInputProps, 'multiline'>) {

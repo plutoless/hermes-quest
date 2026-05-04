@@ -1,4 +1,11 @@
-import type { HermesApiClient, HermesApiRunEvent, HermesApiRunTaskInput, HermesApiRunTaskResult, HermesHealth } from './types';
+import type {
+  HermesApiClient,
+  HermesApiRunEvent,
+  HermesApiRunTaskInput,
+  HermesApiRunTaskResult,
+  HermesHealth,
+  HermesProfileMetadata,
+} from './types';
 
 interface HermesApiHttpResponse {
   status: number;
@@ -222,9 +229,45 @@ function healthFromHttpResponse(response: HermesApiHttpResponse, baseUrl: string
   const body = parseJson(response.body);
   const status = typeof body.status === 'string' ? body.status : 'unknown';
   const platform = typeof body.platform === 'string' ? body.platform : 'Hermes API';
+  const profile = profileFromBody(body);
   return status === 'ok'
-    ? { ok: true, message: `${platform} health ok at ${baseUrl}` }
-    : { ok: false, message: `${platform} health status: ${status}` };
+    ? healthResult(true, `${platform} health ok at ${baseUrl}`, profile)
+    : healthResult(false, `${platform} health status: ${status}`, profile);
+}
+
+function healthResult(ok: boolean, message: string, profile?: HermesProfileMetadata): HermesHealth {
+  return profile ? { ok, message, profile } : { ok, message };
+}
+
+function profileFromBody(body: unknown): HermesProfileMetadata | undefined {
+  if (!body || typeof body !== 'object') return undefined;
+  const candidate = body as Record<string, unknown>;
+  return (
+    profileFromUnknown(candidate.profile, 'profile') ??
+    profileFromUnknown(candidate.active_profile, 'active-profile') ??
+    profileFromPair(candidate.profile_id, candidate.profile_name) ??
+    profileFromPair(candidate.active_profile_id, candidate.active_profile_name)
+  );
+}
+
+function profileFromUnknown(value: unknown, fallbackId: string): HermesProfileMetadata | undefined {
+  if (typeof value === 'string' && value.trim()) {
+    return { id: fallbackId, name: value.trim() };
+  }
+  if (!value || typeof value !== 'object') return undefined;
+  const candidate = value as Record<string, unknown>;
+  return profileFromPair(candidate.id, candidate.name) ?? profileFromPair(candidate.slug, candidate.display_name);
+}
+
+function profileFromPair(idValue: unknown, nameValue: unknown): HermesProfileMetadata | undefined {
+  const name = typeof nameValue === 'string' ? nameValue.trim() : '';
+  if (!name) return undefined;
+  const id = typeof idValue === 'string' && idValue.trim() ? idValue.trim() : slugFromName(name);
+  return { id, name };
+}
+
+function slugFromName(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'profile';
 }
 
 function isTauriRuntime() {

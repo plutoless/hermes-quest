@@ -24,7 +24,7 @@ import {
   PixelTruthStrip,
 } from './ui/pixel';
 import type { BridgeConfig, BridgeMode } from './bridge/types';
-import type { Agent, ReportCard, SystemStatus, Task } from './types';
+import type { Agent, ReportCard, SystemStatus, Task, TimelineEvent } from './types';
 
 const isPetWindowMode = () => new URLSearchParams(window.location.search).get('mode') === 'pet';
 const isPixelShowcaseMode = () => window.location.pathname === '/pixel-ui-showcase';
@@ -229,7 +229,7 @@ function App() {
   const [petOnly] = useState(isPetWindowMode);
   const [selectedVariantId] = useState<VariantId>(getInitialVariant);
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
-  const [petInput, setPetInput] = useState('Help me prepare a newbro demo brief.');
+  const [petInput, setPetInput] = useState('');
   const [boardInput, setBoardInput] = useState('');
   const [boardGoals, setBoardGoals] = useState('');
   const [boardNonGoals, setBoardNonGoals] = useState('');
@@ -583,6 +583,9 @@ function PetPanel({
   const suppressNextClickRef = useRef(false);
   const lastDerivedMessageKeyRef = useRef<string | undefined>(undefined);
   const messageListRef = useRef<HTMLDivElement | null>(null);
+  const chatBubbleRef = useRef<HTMLFormElement | null>(null);
+  const petCharacterRef = useRef<HTMLButtonElement | null>(null);
+  const petInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
   const petState = getPetDisplayState(activeAgent, activeQuest, pendingReports.length);
   const copy = petStateCopy[petState];
   const avatarClass = getPetAvatarAssetClass(activeAgent.role, petState);
@@ -599,25 +602,30 @@ function PetPanel({
   }, [activeAgent, activeQuest, lastSubmittedTaskId, pendingReports, tasks]);
 
   useEffect(() => {
-    if (!expanded || chatMessages.length > 0) return;
-    const greetingKey = `greeting-${petState}-${pendingReports[0]?.id ?? activeQuest?.id ?? 'idle'}`;
-    if (lastDerivedMessageKeyRef.current === greetingKey) return;
-
-    lastDerivedMessageKeyRef.current = greetingKey;
-    setChatMessages([
-      {
-        id: greetingKey,
-        speaker: 'agent',
-        text: pendingReports.length > 0 ? `${pendingReports.length} report ready. Want to review it?` : copy.message,
-        tone: pendingReports.length > 0 ? 'review' : petState,
-      },
-    ]);
-  }, [activeQuest, chatMessages.length, copy.message, expanded, pendingReports, petState]);
-
-  useEffect(() => {
     if (!expanded || !messageListRef.current) return;
     messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
   }, [chatMessages, expanded]);
+
+  useEffect(() => {
+    if (!expanded) return undefined;
+    const frame = requestAnimationFrame(() => petInputRef.current?.focus());
+    return () => cancelAnimationFrame(frame);
+  }, [expanded]);
+
+  useEffect(() => {
+    if (!expanded) return undefined;
+
+    const handleOutsideClick = (event: globalThis.MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      if (chatBubbleRef.current?.contains(target)) return;
+      if (petCharacterRef.current?.contains(target)) return;
+      setExpanded(false);
+    };
+
+    document.addEventListener('click', handleOutsideClick);
+    return () => document.removeEventListener('click', handleOutsideClick);
+  }, [expanded]);
 
   const appendPetMessage = (message: PetChatMessage) => {
     setChatMessages((messages) => trimPetMessages([...messages, message]));
@@ -635,12 +643,6 @@ function PetPanel({
         speaker: 'user',
         text: submittedText,
       },
-      {
-        id: `agent-sending-${submittedAt}`,
-        speaker: 'agent',
-        text: 'I am sending that to Hermes now.',
-        tone: 'thinking',
-      },
     ]);
     try {
       const taskId = await onCreateQuest();
@@ -648,17 +650,6 @@ function PetPanel({
         setLastSubmittedTaskId(taskId);
       }
       setChatState('sent');
-      setChatMessages((messages) =>
-        trimPetMessages([
-          ...messages.filter((message) => !message.id.startsWith('agent-sending-')),
-          {
-            id: `agent-accepted-${taskId ?? Date.now()}`,
-            speaker: 'agent',
-            text: taskId ? 'Quest accepted. I will keep updates here.' : 'I am still here. Add a quest when you are ready.',
-            tone: taskId ? 'running' : 'idle',
-          },
-        ]),
-      );
     } catch {
       setChatState('error');
       appendPetMessage({
@@ -726,18 +717,6 @@ function PetPanel({
           ? { label: 'Progress', icon: 'quest-log' as const, action: onOpenBoard }
           : { label: 'Hall', icon: 'guild-hall' as const, action: onOpenHall };
 
-  const visibleMessages =
-    chatMessages.length > 0
-      ? chatMessages
-      : [
-          {
-            id: 'pet-greeting',
-            speaker: 'agent' as const,
-            text: pendingReports.length > 0 ? `${pendingReports.length} report ready. Want to review it?` : copy.message,
-            tone: pendingReports.length > 0 ? ('review' as const) : petState,
-          },
-        ];
-
   return (
     <aside
       className={`pet-widget ${expanded ? 'bubble-open' : 'collapsed'} pet-state-${petState}`}
@@ -746,6 +725,7 @@ function PetPanel({
       onClick={handleWidgetClick}
     >
       <button
+        ref={petCharacterRef}
         type="button"
         className="pet-character"
         onPointerDown={handlePointerDown}
@@ -761,6 +741,7 @@ function PetPanel({
 
       {expanded && (
         <form
+          ref={chatBubbleRef}
           className={`pet-chat-bubble pet-chat-${chatState}`}
           onPointerDown={(event) => event.stopPropagation()}
           onClick={(event) => event.stopPropagation()}
@@ -770,39 +751,44 @@ function PetPanel({
           }}
         >
           <div className="pet-message-list" ref={messageListRef} aria-live="polite">
-            {visibleMessages.map((message) => (
+            {chatMessages.map((message) => (
               <div key={message.id} className={`pet-message pet-message-${message.speaker} ${message.tone ? `pet-message-${message.tone}` : ''}`}>
                 <span className="pet-message-speaker">{message.speaker === 'user' ? 'You' : activeAgent.name}</span>
                 <p>{message.text}</p>
               </div>
             ))}
           </div>
-          {activeQuest && (
-            <div className="pet-chat-status" aria-label={`${activeQuest.title}: ${activeQuest.progress}% ${activeQuest.state.replace('_', ' ')}`}>
-              <span>{activeQuest.progress}%</span>
-              <span>{activeQuest.state.replace('_', ' ')}</span>
+          <div className="pet-chat-tray">
+            {activeQuest && (
+              <div className="pet-chat-status" aria-label={`${activeQuest.title}: ${activeQuest.progress}% ${activeQuest.state.replace('_', ' ')}`}>
+                <span>{activeQuest.progress}%</span>
+                <span>{activeQuest.state.replace('_', ' ')}</span>
+              </div>
+            )}
+            <div className="pet-chat-row">
+              <PixelInput
+                className="pet-command-input"
+                value={petInput}
+                onChange={onPetInput}
+                placeholder="Ask Hermes..."
+                ariaLabel="Pet quick chat"
+                inputRef={petInputRef}
+              />
+              <PixelButton
+                className="pet-send-chip"
+                type="submit"
+                tone="primary"
+                disabled={!bridgeReady || !petInput.trim() || chatState === 'sending'}
+              >
+                <PixelIcon name="send" size={15} /> Send
+              </PixelButton>
             </div>
-          )}
-          <div className="pet-chat-row">
-            <PixelInput
-              className="pet-command-input"
-              value={petInput}
-              onChange={onPetInput}
-              placeholder="Ask Hermes..."
-              ariaLabel="Pet quick chat"
-            />
-            <PixelButton
-              className="pet-send-chip"
-              type="submit"
-              tone="primary"
-              disabled={!bridgeReady || !petInput.trim() || chatState === 'sending'}
-            >
-              <PixelIcon name="send" size={15} /> Send
-            </PixelButton>
+            <div className="pet-action-row" aria-label="Pet quick actions">
+              <button type="button" className="pet-action-chip" onClick={() => handoffAction.action()}>
+                <PixelIcon name={handoffAction.icon} size={13} /> {handoffAction.label === 'Hall' ? 'Open Hall' : handoffAction.label}
+              </button>
+            </div>
           </div>
-          <button type="button" className="pet-handoff-link" onClick={() => handoffAction.action()}>
-            <PixelIcon name={handoffAction.icon} size={14} /> Open {handoffAction.label}
-          </button>
         </form>
       )}
     </aside>
@@ -829,7 +815,18 @@ function excerptPetText(text: string, maxLength = 190) {
   return `${compact.slice(0, maxLength - 1).trimEnd()}...`;
 }
 
-function getPetAgentResponse({
+function isPetVisibleTimelineEvent(event: TimelineEvent) {
+  if (event.source === 'guild' || event.source === 'bridge') return false;
+  const normalized = event.message.toLowerCase();
+  return ![
+    'started hermes api run',
+    'hermes api streamed response text',
+    'hermes api run completed',
+    'captured final hermes output as a review artifact',
+  ].some((blocked) => normalized.includes(blocked));
+}
+
+export function getPetAgentResponse({
   activeAgent,
   activeQuest,
   pendingReports,
@@ -850,16 +847,14 @@ function getPetAgentResponse({
     const reportTask = tasks.find((task) => task.id === matchingReport.taskId);
     const artifactOutput = matchingReport.artifacts.find((artifact) => artifact.kind === 'summary')?.description;
     const output = matchingReport.summary || artifactOutput;
-    const text = output
-      ? `Returned output: ${excerptPetText(output)}`
-      : `${matchingReport.title} is ready for review.`;
+    if (!output) return undefined;
     return {
       key: `report-${matchingReport.id}-${matchingReport.summary.length}-${artifactOutput?.length ?? 0}`,
       state: 'sent',
       message: {
         id: `agent-report-${matchingReport.id}`,
         speaker: 'agent',
-        text,
+        text: excerptPetText(output),
         tone: reportTask?.state === 'approved' ? 'completed' : 'review',
       },
     };
@@ -884,13 +879,10 @@ function getPetAgentResponse({
 
   const latestUsefulEvent = [...trackedTask.timeline]
     .reverse()
-    .find((event) => !['created', 'assigned'].includes(event.type) && event.message.trim().length > 0);
+    .find((event) => isPetVisibleTimelineEvent(event) && event.message.trim().length > 0);
 
   if (latestUsefulEvent) {
-    const eventText =
-      latestUsefulEvent.type === 'completed' || latestUsefulEvent.type === 'review_required'
-        ? latestUsefulEvent.message
-        : `${latestUsefulEvent.message} (${trackedTask.progress}%)`;
+    const eventText = latestUsefulEvent.message;
     return {
       key: `task-event-${trackedTask.id}-${latestUsefulEvent.id}-${trackedTask.progress}`,
       state: 'sent',
@@ -899,19 +891,6 @@ function getPetAgentResponse({
         speaker: 'agent',
         text: excerptPetText(eventText, 160),
         tone: trackedTask.state === 'needs_review' ? 'review' : trackedTask.state === 'running' ? 'running' : 'thinking',
-      },
-    };
-  }
-
-  if (!lastSubmittedTaskId && (trackedTask.state === 'created' || trackedTask.state === 'assigned')) {
-    return {
-      key: `task-accepted-${trackedTask.id}-${trackedTask.updatedAt}`,
-      state: 'sent',
-      message: {
-        id: `agent-task-${trackedTask.id}`,
-        speaker: 'agent',
-        text: `${activeAgent.name} accepted "${trackedTask.title}". I will post progress here.`,
-        tone: 'thinking',
       },
     };
   }

@@ -10,7 +10,15 @@ import type {
   Task,
   TimelineEvent,
 } from '../types';
-import type { BridgeConfig, HermesApiClient, HermesApiRunEvent, HermesBridgeApi, HermesHealth, Listener } from './types';
+import type {
+  BridgeConfig,
+  HermesApiClient,
+  HermesApiRunEvent,
+  HermesBridgeApi,
+  HermesHealth,
+  HermesProfileMetadata,
+  Listener,
+} from './types';
 
 const now = () => new Date().toISOString();
 
@@ -118,6 +126,46 @@ export class RealHermesBridge implements HermesBridgeApi {
 
   async getHealth(): Promise<HermesHealth> {
     return this.apiClient.checkHealth();
+  }
+
+  applyHermesProfile(profile: HermesProfileMetadata | undefined) {
+    const realProfile = profile ?? { id: 'profile-unavailable', name: 'Profile unavailable' };
+    const currentAgent = this.snapshot.agents.find((agent) => agent.id === this.snapshot.activeProfileId);
+    const activeAgent: Agent = {
+      id: realProfile.id,
+      name: realProfile.name,
+      role: 'Builder',
+      status: currentAgent?.status ?? 'idle',
+      availability: currentAgent?.availability ?? 'available',
+      activeInPet: true,
+      currentTaskId: currentAgent?.currentTaskId,
+      traits: ['Execution', 'Planning', 'Reliability'],
+      bestFor: 'real Hermes API execution',
+      avoid: 'unsupported profile routing claims',
+      health: profile ? 'Mapped from Hermes API metadata' : 'Hermes API profile metadata unavailable',
+      equipment: ['Hermes API server', 'Workspace tools'],
+      skills: [],
+    };
+
+    const previousActiveProfileId = this.snapshot.activeProfileId;
+    this.snapshot.activeProfileId = activeAgent.id;
+    this.snapshot.agents = [activeAgent];
+    this.snapshot.tasks = this.snapshot.tasks.map((task) =>
+      task.assigneeId === previousActiveProfileId ? { ...task, assigneeId: activeAgent.id } : task,
+    );
+    this.snapshot.reports = this.snapshot.reports.map((report) =>
+      report.agentId === previousActiveProfileId ? { ...report, agentId: activeAgent.id } : report,
+    );
+    this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
+      logsSummary: `${this.snapshot.systemStatus.logsSummary} Active Hermes profile: ${activeAgent.name}.`,
+      warnings: profile
+        ? this.snapshot.systemStatus.warnings.filter((warning) => warning !== 'Hermes API /health did not provide active profile metadata.')
+        : [
+            'Hermes API /health did not provide active profile metadata.',
+            ...this.snapshot.systemStatus.warnings.filter((warning) => warning !== 'Hermes API /health did not provide active profile metadata.'),
+          ],
+    };
   }
 
   setRuntimeStatus(patch: Partial<BridgeSnapshot['systemStatus']>) {
@@ -303,7 +351,7 @@ export class RealHermesBridge implements HermesBridgeApi {
     this.updateTask(task.id, {
       state: 'running',
       progress: 25,
-      timeline: [...task.timeline, this.timeline(task.id, task.assigneeId, 'started', 'Started Hermes API run.', 'hermes')],
+      timeline: task.timeline,
     });
     this.setAgentBusy(task.assigneeId, task.id, 'running');
     this.emit(makeEvent('task_progress', task.assigneeId, task.id, { progress: 25 }));
@@ -333,8 +381,7 @@ export class RealHermesBridge implements HermesBridgeApi {
       reviewStatus: 'required',
       timeline: [
         ...task.timeline,
-        this.timeline(task.id, task.assigneeId, 'artifact', 'Captured final Hermes output as a review artifact.', 'hermes'),
-        this.timeline(task.id, task.assigneeId, 'completed', 'Hermes API run completed.', 'hermes'),
+        this.timeline(task.id, task.assigneeId, 'completed', finalOutput, 'hermes'),
         this.timeline(task.id, task.assigneeId, 'review_required', 'Quest Report Card is ready for review.', 'guild'),
       ],
     });
@@ -397,19 +444,18 @@ export class RealHermesBridge implements HermesBridgeApi {
   }
 
   private timelineForRunEvent(task: Task, event: HermesApiRunEvent): TimelineEvent | undefined {
-    if (event.event === 'message.delta') {
-      return this.timeline(task.id, task.assigneeId, 'progress', 'Hermes API streamed response text.', 'hermes');
-    }
-    if (event.event === 'tool.started') {
-      return this.timeline(task.id, task.assigneeId, 'progress', `Hermes API tool started: ${event.tool ?? 'tool'}.`, 'hermes');
-    }
-    if (event.event === 'tool.completed') {
-      return this.timeline(task.id, task.assigneeId, 'progress', `Hermes API tool completed: ${event.tool ?? 'tool'}.`, 'hermes');
-    }
-    if (event.event === 'reasoning.available') {
-      return this.timeline(task.id, task.assigneeId, 'progress', 'Hermes API made reasoning available.', 'hermes');
-    }
-    return undefined;
+    const messageText = this.textFromRunEvent(event);
+    if (!messageText) return undefined;
+    return this.timeline(task.id, task.assigneeId, 'progress', messageText, 'hermes');
+  }
+
+  private textFromRunEvent(event: HermesApiRunEvent) {
+    const text =
+      typeof event.text === 'string' ? event.text :
+        typeof event.preview === 'string' ? event.preview :
+          typeof event.delta === 'string' ? event.delta :
+            undefined;
+    return text?.trim();
   }
 
   private artifactsForTask(task: Task, finalOutput: string): Artifact[] {

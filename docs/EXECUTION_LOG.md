@@ -2327,3 +2327,67 @@ Deferred:
 - Direct native webview content introspection remains limited by desktop automation access.
 - Completion audit is documented in `docs/COMPLETION_AUDIT.md`.
 - Native verification handoff is documented in `docs/NATIVE_VERIFICATION.md`.
+
+### 2026-05-05 03:08 CST — Real Hermes profile name and Pet output grounding
+
+#### Goal
+Make Pet Mode show a truthful real Hermes profile name and prevent bridge-authored operational labels from appearing as agent chat.
+
+#### Changed
+- Added `BridgeConfig.realProfileName` so users can configure the active real Hermes profile display name while the local Hermes API does not expose profile identity.
+- Added optional Hermes health profile metadata parsing for future `/health` responses that include `profile`, `active_profile`, `profile_id` / `profile_name`, or `active_profile_id` / `active_profile_name`.
+- Updated the real bridge to expose one active real profile agent using configured name first, API metadata second, and `Hermes profile` as the truthful fallback.
+- Removed synthetic real Hermes timeline messages such as run-start, streamed-response placeholder, run-complete, and artifact-capture narration from pet-visible real output.
+- Updated Pet Mode derived response selection so Guild/bridge timeline narration does not become chat bubbles.
+- Documented Pet-visible message selection and real profile naming in `docs/API_CONTRACT.md`.
+
+#### Hermes API Metadata Reality
+- `GET /health` currently returns `{"status":"ok","platform":"hermes-agent"}`.
+- `GET /v1/profile`, `GET /v1/profiles`, and `GET /v1/agents` currently return `404`.
+- Because of that API gap, configured real profile display name is the available v0 source of truth for the real Pet Mode label.
+
+#### Validation
+- `bun test src/bridge/hermesApiClient.test.ts`: passed; 6 tests / 11 assertions.
+- `bun test src/bridge/bridgeFactory.test.ts`: passed; 13 tests / 61 assertions.
+- `bun run lint`: passed.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 43 tests / 168 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+#### Manual Check
+- Started Vite at `http://127.0.0.1:1420/`.
+- Confirmed the real local Hermes API still exposes health only: `GET /health` returned `{"status":"ok","platform":"hermes-agent"}` and `GET /v1/profile` returned `404`.
+- The live local Hermes run did not return within the headless check window, so a temporary Hermes-compatible test API on `127.0.0.1:18642` was used to verify UI behavior without waiting on a provider run.
+- Headless Pet Mode with bridge mode `real`, `realProfileName: "Daily Driver"`, and the temporary API rendered `Daily Driver` as the speaker and `Returned output: Manual Hermes output.` after Send.
+- The rendered Pet Mode text did not include `Started Hermes API run.`, `Hermes API streamed response text.`, `Hermes API run completed.`, or artifact-capture narration.
+
+### 2026-05-05 CST — Pet chat raw output and API-only profile identity correction
+
+#### Goal
+Correct the previous real-profile implementation so Pet chat is minimal and profile identity only comes from Hermes API metadata.
+
+#### Changed
+- Removed `BridgeConfig.realProfileName` as a profile-name source and stripped legacy stored values during config load/save.
+- Removed the manual `Real profile name` bridge setting so the UI cannot spoof the active Hermes profile name.
+- Kept `/health` profile metadata parsing for future API responses such as `profile.name`, `active_profile.name`, `profile_name`, and related id/name pairs.
+- Updated real mode to display the API profile name when metadata exists and `Profile unavailable` when `/health` omits profile metadata.
+- Updated Pet chat so opening expanded chat starts with no greeting bubble, Pet input starts empty, and expanded Pet Mode requests focus for `Pet quick chat`.
+- Removed Pet-authored sending/accepted/report-wrapper messages; completed reports now render raw Hermes output such as `Manual Hermes output.` instead of `Returned output: Manual Hermes output.`
+- Updated `SPEC.md`, `GOAL.md`, and `docs/API_CONTRACT.md` to document API-only profile identity and raw Pet-visible chat text.
+
+#### Hermes API Metadata Reality
+- Current observed health remains `{"status":"ok","platform":"hermes-agent"}`.
+- That response has no profile metadata, so real mode now honestly surfaces `Profile unavailable` until Hermes exposes active profile metadata.
+
+#### Validation
+- `bun test src/App.pet.test.ts`: passed; 2 tests / 3 assertions.
+- `bun test src/bridge/hermesApiClient.test.ts`: passed; 6 tests / 11 assertions.
+- `bun test src/bridge/bridgeFactory.test.ts`: passed; 13 tests / 64 assertions.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 45 tests / 174 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+#### Manual Check
+- Started Vite at `http://127.0.0.1:1431/`.
+- Headless Chrome dump of `/?mode=pet&variant=skyship-command-deck&pet=expanded` showed an empty `Pet quick chat` input, an empty `.pet-message-list`, and no greeting/status/report wrapper text.
+- The Browser plugin Node REPL surface was unavailable in this session, and a direct CDP focus probe timed out, so focus behavior is covered by implementation and build checks rather than a completed browser focus assertion.

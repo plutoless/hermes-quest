@@ -28,6 +28,10 @@ function installFakeStorage() {
   });
 }
 
+function legacyConfigWithManualProfileName(name: string): BridgeConfig & { realProfileName: string } {
+  return { bridgeMode: 'real', hermesApiBaseUrl: 'http://127.0.0.1:8642', realProfileName: name };
+}
+
 describe('bridgeFactory', () => {
   beforeEach(() => {
     installFakeStorage();
@@ -44,6 +48,22 @@ describe('bridgeFactory', () => {
     expect(loadBridgeConfig()).toEqual({
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:9999',
+    });
+  });
+
+  test('bridge config discards manual real profile display name', () => {
+    localStorage.setItem(
+      'hermes-guild.bridge-config',
+      JSON.stringify({
+        bridgeMode: 'real',
+        hermesApiBaseUrl: 'http://127.0.0.1:8642/',
+        realProfileName: 'Daily Driver',
+      }),
+    );
+
+    expect(loadBridgeConfig()).toEqual({
+      bridgeMode: 'real',
+      hermesApiBaseUrl: 'http://127.0.0.1:8642',
     });
   });
 
@@ -110,7 +130,7 @@ describe('bridgeFactory', () => {
     expect(snapshot.systemStatus.logsSummary).toContain('Hermes API unavailable');
     expect(snapshot.systemStatus.logsSummary).not.toContain('fallback to mock');
     expect(snapshot.systemStatus.logsSummary).not.toContain('Mock Hermes Bridge');
-    expect(snapshot.agents.find((agent) => agent.id === 'builder')?.status).toBe('error');
+    expect(snapshot.agents.find((agent) => agent.id === snapshot.activeProfileId)?.status).toBe('error');
     expect(snapshot.agents.map((agent) => agent.name)).not.toContain('Brass');
   });
 
@@ -135,7 +155,7 @@ describe('bridgeFactory', () => {
 
     const taskId = await bridge.submitTask?.({
       brief: 'Write a real bridge smoke report.',
-      assigneeId: 'builder',
+      assigneeId: activeAgent?.id ?? '',
       type: 'pet',
     });
 
@@ -145,7 +165,7 @@ describe('bridgeFactory', () => {
     const task = snapshot.tasks.find((item) => item.id === taskId);
     const report = snapshot.reports.find((item) => item.taskId === taskId);
 
-    expect(activeAgent?.id).toBe('builder');
+    expect(activeAgent?.id).toBe('profile-unavailable');
     expect(calls).toHaveLength(1);
     expect(calls[0].input).toContain('Write a real bridge smoke report.');
     expect(calls[0].instructions).toContain('Quest Report Card');
@@ -155,6 +175,109 @@ describe('bridgeFactory', () => {
     expect(report?.summary).toContain('Final answer from Hermes API');
     expect(report?.facts).toContain('Hermes API returned final output for this Guild quest.');
     expect(snapshot.systemStatus.hermesApiBaseUrl).toBe('http://127.0.0.1:8642');
+  });
+
+  test('real mode ignores configured real profile name and uses API profile metadata', async () => {
+    const bridge = await createBridgeFromConfig(
+      legacyConfigWithManualProfileName('Daily Driver'),
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Hermes API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+        },
+      },
+    );
+
+    const snapshot = bridge.getSnapshot();
+    const activeAgent = snapshot.agents.find((agent) => agent.id === snapshot.activeProfileId);
+
+    expect(activeAgent?.id).toBe('api-profile');
+    expect(activeAgent?.name).toBe('API Profile');
+    expect(activeAgent?.activeInPet).toBe(true);
+    expect(snapshot.activeProfileId).toBe('api-profile');
+    expect(snapshot.systemStatus.logsSummary).toContain('API Profile');
+    expect(snapshot.systemStatus.logsSummary).not.toContain('Daily Driver');
+  });
+
+  test('real mode uses API profile metadata when configured profile name is absent', async () => {
+    const bridge = await createBridgeFromConfig(
+      { bridgeMode: 'real', hermesApiBaseUrl: 'http://127.0.0.1:8642' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Hermes API healthy',
+            profile: { id: 'daily-driver', name: 'Daily Driver' },
+          }),
+          runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+        },
+      },
+    );
+
+    const snapshot = bridge.getSnapshot();
+    const activeAgent = snapshot.agents.find((agent) => agent.id === snapshot.activeProfileId);
+
+    expect(activeAgent?.id).toBe('daily-driver');
+    expect(activeAgent?.name).toBe('Daily Driver');
+  });
+
+  test('real mode surfaces explicit missing profile state when API metadata is absent', async () => {
+    const bridge = await createBridgeFromConfig(
+      { bridgeMode: 'real', hermesApiBaseUrl: 'http://127.0.0.1:8642' },
+      {
+        apiClient: {
+          checkHealth: async () => ({ ok: true, message: 'Hermes API healthy' }),
+          runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+        },
+      },
+    );
+
+    const snapshot = bridge.getSnapshot();
+    const activeAgent = snapshot.agents.find((agent) => agent.id === snapshot.activeProfileId);
+
+    expect(activeAgent?.name).toBe('Profile unavailable');
+    expect(activeAgent?.name).not.toBe('Hermes Builder');
+    expect(activeAgent?.name).not.toBe('Hermes profile');
+    expect(snapshot.systemStatus.warnings).toContain('Hermes API /health did not provide active profile metadata.');
+  });
+
+  test('real task timeline keeps pet-visible Hermes output free of synthetic run narration', async () => {
+    const bridge = await createBridgeFromConfig(
+      { bridgeMode: 'real', hermesApiBaseUrl: 'http://127.0.0.1:8642' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Hermes API healthy',
+            profile: { id: 'daily-driver', name: 'Daily Driver' },
+          }),
+          runTask: async () => ({
+            ok: true,
+            output: 'This is the real Hermes answer.',
+            events: [
+              { event: 'message.delta', delta: 'This is the real Hermes answer.' },
+              { event: 'run.completed', output: 'This is the real Hermes answer.' },
+            ],
+          }),
+        },
+      },
+    );
+
+    const taskId = bridge.createTask({ brief: 'Say something useful.', assigneeId: bridge.getSnapshot().activeProfileId, type: 'pet' });
+    await wait(20);
+
+    const task = await bridge.getTask?.(taskId);
+    const messages = task?.timeline.map((event) => event.message) ?? [];
+
+    expect(messages).toContain('This is the real Hermes answer.');
+    expect(messages).not.toContain('Started Hermes API run.');
+    expect(messages).not.toContain('Hermes API streamed response text.');
+    expect(messages).not.toContain('Hermes API run completed.');
+    expect(messages).not.toContain('Captured final Hermes output as a review artifact.');
   });
 
   test('real mode uses the Hermes API client and not the subprocess runner', async () => {
@@ -179,7 +302,7 @@ describe('bridgeFactory', () => {
 
     await bridge.submitTask?.({
       brief: 'Use API only.',
-      assigneeId: 'builder',
+      assigneeId: bridge.getSnapshot().activeProfileId,
       type: 'pet',
     });
 
@@ -204,7 +327,7 @@ describe('bridgeFactory', () => {
 
     const taskId = bridge.createTask({
       brief: 'Trigger real bridge error.',
-      assigneeId: 'builder',
+      assigneeId: bridge.getSnapshot().activeProfileId,
       type: 'pet',
     });
 
@@ -216,7 +339,7 @@ describe('bridgeFactory', () => {
     expect(task?.state).toBe('error');
     expect(task?.error).toContain('provider rejected the request');
     expect(task?.timeline.at(-1)?.type).toBe('error');
-    expect(snapshot.agents.find((agent) => agent.id === 'builder')?.status).toBe('error');
+    expect(snapshot.agents.find((agent) => agent.id === snapshot.activeProfileId)?.status).toBe('error');
     expect(snapshot.systemStatus.gatewayStatus).toBe('error');
   });
 });

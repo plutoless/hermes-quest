@@ -8,9 +8,15 @@ export interface BridgeConfig {
   hermesApiBaseUrl: string;
 }
 
+export interface HermesProfileMetadata {
+  id: string;
+  name: string;
+}
+
 export interface HermesHealth {
   ok: boolean;
   message: string;
+  profile?: HermesProfileMetadata;
 }
 
 export interface HermesApiRunTaskInput {
@@ -29,6 +35,10 @@ export interface HermesApiRunEvent {
   tool?: string;
   preview?: string;
   text?: string;
+  profile?: { id?: unknown; name?: unknown } | string;
+  active_profile?: { id?: unknown; name?: unknown } | string;
+  profile_id?: string;
+  profile_name?: string;
   [key: string]: unknown;
 }
 

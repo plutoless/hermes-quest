@@ -49,6 +49,7 @@ export async function createBridgeFromConfig(config: BridgeConfig, options: Brid
   const health = await realBridge.getHealth?.();
 
   if (sanitized.bridgeMode === 'real') {
+    realBridge.applyHermesProfile(health?.profile);
     realBridge.setRuntimeStatus({
       bridgeMode: 'real',
       activeImplementation: 'real',
@@ -58,6 +59,9 @@ export async function createBridgeFromConfig(config: BridgeConfig, options: Brid
         ? `Bridge mode: real. Active implementation: real. Hermes available: ${health.message}`
         : `Bridge mode: real. Active implementation: real. Hermes unavailable: ${health?.message ?? 'health check failed'}`,
     });
+    if (health?.ok) {
+      realBridge.applyHermesProfile(health.profile);
+    }
     if (health && !health.ok) {
       realBridge.markUnavailable(health.message);
     }
@@ -72,6 +76,7 @@ export async function createBridgeFromConfig(config: BridgeConfig, options: Brid
       hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
       logsSummary: `Bridge mode: auto. Active implementation: real. Hermes available: ${health.message}`,
     });
+    realBridge.applyHermesProfile(health.profile);
     return realBridge;
   }
 
@@ -102,7 +107,6 @@ function sanitizeConfig(raw: unknown): BridgeConfig {
   const hermesApiBaseUrl = typeof candidate.hermesApiBaseUrl === 'string' && candidate.hermesApiBaseUrl.trim()
     ? normalizeBaseUrl(candidate.hermesApiBaseUrl)
     : defaultConfig.hermesApiBaseUrl;
-
   return {
     bridgeMode,
     hermesApiBaseUrl,
