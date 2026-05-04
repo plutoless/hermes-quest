@@ -10,7 +10,7 @@ const nativeBuild = readFileSync('src-tauri/build.rs', 'utf8');
 const defaultCapability = JSON.parse(readFileSync('src-tauri/capabilities/default.json', 'utf8'));
 const windowProperties = schema.definitions?.WindowConfig?.properties ?? {};
 const requiredWindowKeys = ['label', 'title', 'width', 'height', 'resizable', 'decorations'];
-const requiredPetKeys = ['url', 'transparent', 'alwaysOnTop'];
+const requiredPetKeys = ['url', 'transparent', 'alwaysOnTop', 'skipTaskbar', 'shadow'];
 
 const fail = (message) => {
   console.error(`tauri config check failed: ${message}`);
@@ -67,8 +67,18 @@ if (petWindow.url !== '/?mode=pet') {
   fail('pet window must load /?mode=pet');
 }
 
-if (petWindow.decorations !== false || petWindow.transparent !== true || petWindow.alwaysOnTop !== false) {
-  fail('pet window must be undecorated, transparent, and not pinned always on top');
+if (mainWindow.visible !== false) {
+  fail('main window must be hidden on native startup so only Pet Mode appears');
+}
+
+if (
+  petWindow.decorations !== false ||
+  petWindow.transparent !== true ||
+  petWindow.alwaysOnTop !== true ||
+  petWindow.skipTaskbar !== true ||
+  petWindow.shadow !== false
+) {
+  fail('pet window must be undecorated, transparent, always-on-top, skipped from taskbar, and shadowless');
 }
 
 if (petWindow.transparent === true && config.app.macOSPrivateApi !== true) {

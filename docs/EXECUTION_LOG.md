@@ -2073,6 +2073,241 @@ Remove unnecessary prompt/reference docs and unused pixel assets before committi
 - `cargo fmt --check` in `src-tauri`: passed.
 - `cargo check` in `src-tauri`: passed.
 
+### 2026-05-05 CST — Pet Mode companion redesign
+
+#### Goal
+Redesign the floating Pet Mode from a mini chat/form panel into a compact desktop companion widget while preserving the existing task submission and main-window handoff loop.
+
+#### Changed
+- Added `docs/PET_MODE_REDESIGN.md` as the focused Pet Mode implementation spec.
+- Replaced the old production-visible Pet Mode form panel with a compact companion-first widget:
+  - collapsed state shows the avatar, state badge, and one short speech bubble
+  - expanded state shows a lightweight companion card with task summary, active profile chip, quick actions, compact truth text, and optional one-line quest command
+  - no full input box, profile form, timeline, diagnostics, or chat history appears by default
+- Reused the shared `PixelAvatar` / `PixelAvatarFrame` rendering path so the pet avatar keeps the same character identity and centered placement.
+- Added pet display-state mapping for `idle`, `thinking`, `running`, `needs_review`, and `error` based on active quest, pending review count, and active agent status.
+- Added compact Pet Mode handoff support through local storage so quick actions can open Guild Hall, Quest Board, Review Chamber, or a selected task in the main window.
+- Kept bridge truth visible in Pet Mode as compact product copy instead of raw diagnostics.
+
+#### Preserved
+- No avatar redesign or character regeneration was performed.
+- Main Guild Hall / Quest Board / Review Chamber layouts were not broadly redesigned.
+- Existing pet task submission still uses the active profile and the existing bridge task creation path.
+- RealHermes bridge, mock/real/auto bridge modes, review approve/revise flow, and `/pixel-ui-showcase` were preserved.
+
+#### Visual Check
+- Captured `/private/tmp/hermes-pet-collapsed.png`; verified the default Pet Mode is character-first, compact, and has no full input box or dashboard panel.
+- Captured `/private/tmp/hermes-pet-expanded.png`; verified the expanded mode is a lightweight companion card rather than a tall chat/form widget.
+
+#### Validation
+- `bun run lint`: passed during implementation.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-05 CST — Transparent Pet window and quick-chat bubble
+
+#### Goal
+Finish `GOAL.md`: make Pet Mode a transparent character-only desktop pet by default, with click-to-open quick chat, and native Hall/Pet visibility switching.
+
+#### Changed
+- Added `SPEC.md` and `GOAL.md` to capture the transparent Pet Mode execution contract and measurable acceptance criteria.
+- Reworked Pet Mode rendering in `src/App.tsx`:
+  - collapsed state renders only the active character sprite plus lightweight state animation/accent
+  - clicked/expanded state opens a compact speech-bubble quick chat with a single-line input, Send, and one main-window handoff action
+  - Send still calls the existing pet task submission path with the active profile
+  - removed the previous expanded companion-card/profile-form treatment from Pet Mode
+- Reworked Pet Mode CSS in `src/styles.css`:
+  - transparent `body`/window surface for `?mode=pet`
+  - character-only default surface with CSS float/pulse/bounce/shake state motion
+  - compact parchment speech bubble for quick chat
+  - reduced-motion support for pet motion
+- Updated native Tauri behavior:
+  - main window is hidden on startup
+  - pet window is transparent, shadowless, always-on-top, and skipped from taskbar
+  - added native commands for showing Hall/Pet
+  - tray click shows Hall and hides Pet
+  - macOS app reopen / Dock activation shows Hall and hides Pet
+  - Hall close hides Hall and shows Pet instead of exiting
+  - a native monitor restores Pet when Hall is minimized
+- Updated `scripts/check-tauri-config.mjs` so validation enforces the new native startup/window expectations.
+- Re-ran the existing asset cleanup helper; it kept avatar identity unchanged and touched a few transparent runtime assets used by the pixel UI.
+
+#### Preserved
+- Main Guild Hall, Quest Board, and Review Chamber layouts were not broadly redesigned.
+- Character identity was not regenerated or redesigned.
+- Existing bridge submission path, RealHermes bridge behavior, mock/real/auto modes, and approve/revise flow were preserved.
+
+#### Visual / Native Checks
+- Browser fallback collapsed screenshot: `/private/tmp/hermes-transparent-pet-collapsed.png`; verified no default panel/card/input/dashboard, only the character sprite over the page background.
+- Browser fallback bubble screenshot: `/private/tmp/hermes-transparent-pet-bubble.png`; verified the clicked state is a compact speech-bubble quick chat with input, Send, and Open Hall.
+- Native process/window inspection via System Events reported one visible `hermes-guild` window named `Hermes Pet` at `505,183` with size `460x260`; no visible `Hermes Guild` Hall window was reported on startup.
+- Native crop screenshot: `/private/tmp/hermes-native-pet-crop.png`; verified the native Pet window renders transparently over the desktop/terminal content with only the character visible.
+- Direct automated native click on the Pet window was blocked by macOS accessibility error `-25204`; bubble behavior was verified through the browser fallback route and native Hall/Pet switching is covered by compiled Tauri lifecycle code plus config validation.
+
+#### Validation
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed after native reopen handling.
+- `cargo check` in `src-tauri`: passed after native reopen handling.
+
+### 2026-05-05 CST — Pet quick-chat in-place response polish
+
+#### Goal
+Fix the Pet quick-chat experience so opening the bubble does not push the character away, and sending a quest keeps the user in Pet Mode with compact response/status feedback.
+
+#### Changed
+- Updated `SPEC.md` and `GOAL.md` with the new accepted Pet quick-chat behavior:
+  - the bubble must be an anchored overlay, not a layout that moves the pet
+  - quick-chat Send must stay in Pet Mode
+  - the bubble should remain open and show compact status/response copy after Send
+- Split Pet task submission behavior in `src/App.tsx` so Pet quick chat can submit through the existing bridge path without calling `openMainView('board')`.
+- Added Pet bubble feedback states for sending, sent, and error.
+- Kept the bubble open after Send and added compact active-quest status copy when a task is available.
+- Reworked Pet bubble layout in `src/styles.css` so the character stays visually anchored while the speech bubble floats above it.
+- Increased the transparent Pet native window height from `460x360` to `460x420` so the anchored bubble has room without covering the character or shifting it.
+
+#### Preserved
+- Existing bridge submission path, active profile routing, RealHermes behavior, mock/real/auto modes, and approve/revise flow were preserved.
+- Hall/Board/Review UI layouts were not redesigned.
+- Character identity and avatar assets were unchanged.
+
+#### Visual Checks
+- Browser fallback collapsed screenshot: `/private/tmp/hermes-pet-chat-collapsed-v2.png`; verified the default Pet view remains character-only at the updated native window size.
+- Browser fallback expanded screenshot: `/private/tmp/hermes-pet-chat-expanded-v2.png`; verified the bubble appears as an overlay above the pet and the character remains in the same anchored position.
+
+#### Validation
+- `bun run lint`: passed.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-05 CST — Pet message-chat bubble response flow
+
+#### Goal
+Execute `GOAL.md`: make expanded Pet Mode feel like compact message chat bubbles and surface the best available Hermes/bridge response in Pet view instead of only generic report/quest status.
+
+#### Changed
+- Reworked Pet Mode chat state in `src/App.tsx` from a single response string into a lightweight in-memory message list.
+- Pet chat now renders distinct message bubbles for:
+  - Hermes/agent greeting or status
+  - the user's submitted message
+  - Hermes/agent acknowledgement
+  - bridge/timeline progress
+  - final report/output excerpts
+- Pet chat stays open after Send and still submits through the existing active-profile pet task path without opening Hall or Quest Board.
+- Added best-available response derivation:
+  - prefer report summary / final output or summary artifact text
+  - scope returned reports to the most recently submitted pet task when available
+  - otherwise use latest useful task timeline/progress events
+  - otherwise use a short honest fallback
+- Replaced generic `report ready` / `quest completed` display with `Returned output: ...` excerpts when output is available.
+- Added message-list auto-scroll so the latest user/agent exchange remains visible after Send.
+- Updated Pet chat CSS in `src/styles.css` with separate user and agent bubble treatments while keeping the anchored overlay and transparent character-first collapsed mode.
+
+#### Preserved
+- Main Guild Hall, Quest Board, and Review Chamber UI were not broadly redesigned.
+- Character identity and avatar assets were unchanged.
+- RealHermes bridge, mock/real/auto modes, pet submit, and approve/revise flow were preserved.
+- Existing Hall/Progress/Review/Issue handoff actions remain explicit.
+
+#### Visual / Manual Checks
+- Browser collapsed screenshot: `/private/tmp/hermes-pet-message-collapsed.png`; verified transparent character-first collapsed Pet Mode remains intact.
+- Browser opened-chat screenshot: `/private/tmp/hermes-pet-message-expanded.png`; verified expanded Pet opens compact chat surface without moving the pet.
+- Interactive post-send screenshot: `/private/tmp/hermes-pet-chat-message-post-send.png`; verified Send stays in Pet Mode and appends user + agent message bubbles.
+- Interactive completed-output screenshot: `/private/tmp/hermes-pet-chat-message-final-output.png`; verified Pet Mode shows a returned output excerpt rather than only generic report-ready/completed copy.
+
+#### Validation
+- `bun run lint`: passed during implementation.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-05 CST — Pet lightweight transparent overlay polish
+
+#### Goal
+Execute `GOAL.md`: keep the pet as the visual anchor and make expanded Pet Mode feel like a lightweight transparent speech-bubble overlay rather than a heavy parchment panel, mini chat app, or mini dashboard.
+
+#### Changed
+- Refined the expanded Pet chat styling in `src/styles.css`:
+  - removed the whole-area parchment panel border/background/shadow from `.pet-chat-bubble`
+  - kept individual readable message bubbles while making the outer chat layer transparent
+  - hid the visible scrollbar and reduced the visible message stack so the overlay does not read like a persistent chat window
+  - changed the input row from a framed mini form into lightweight overlay controls
+  - styled Send as a compact chip-like command button
+  - kept Review/Open/Progress/Issue handoff actions as small lightweight chips
+- Refined Pet message handling in `src/App.tsx`:
+  - new Pet submissions start a fresh lightweight current exchange instead of carrying old report bubbles forward
+  - capped visible Pet chat messages to the latest three bubbles
+  - avoided duplicate "accepted" bubbles for just-submitted assigned tasks while preserving progress/final output updates
+
+#### Preserved
+- Collapsed Pet Mode remains character-first and transparent.
+- The pet character position, identity, and avatar assets were unchanged.
+- Send still stays in Pet Mode and does not automatically open Hall or Quest Board.
+- Hermes/agent response, progress, and final output/report excerpt bubbles remain available.
+- Explicit Hall/Progress/Review/Issue handoff actions remain available.
+- Guild Hall, Quest Board, Review Chamber, Pixel UI Kit, RealHermes bridge, mock/real/auto modes, submit flow, and approve/revise flow were not broadly changed.
+
+#### Visual / Manual Checks
+- Browser collapsed screenshot: `/private/tmp/hermes-pet-overlay-collapsed.png`; verified the collapsed view remains a transparent character-first pet.
+- Browser opened overlay screenshot: `/private/tmp/hermes-pet-overlay-expanded.png`; verified the opened chat has no whole-area parchment panel and the pet remains anchored.
+- Interactive post-send screenshot: `/private/tmp/hermes-pet-overlay-post-send.png`; verified user + Hermes bubbles stay in Pet Mode and do not open Hall/Quest Board.
+- Interactive completed-output screenshot: `/private/tmp/hermes-pet-overlay-final-output.png`; verified progress/final output excerpts still appear in the lightweight overlay.
+
+#### Validation
+- `bun run lint`: passed during implementation.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-05 CST — Pet chat close and drag interaction fixes
+
+#### Goal
+Fix Pet Mode interaction regressions: close should collapse chat, the pet should remain draggable while chat is open, and drag release should not open chat.
+
+#### Changed
+- Moved Pet drag gesture handling onto the character button with pointer events so the character remains the drag handle in collapsed and expanded states.
+- Added drag-threshold tracking and next-click suppression so releasing after a drag does not trigger chat open.
+- Removed the expanded-state guard that prevented dragging while chat was open.
+- Made the close button stop pointer/click propagation before collapsing chat and increased its hit target while keeping the lightweight overlay style.
+- Kept the chat overlay itself as a non-drag zone so input, Send, and handoff chips remain normal controls.
+
+#### Manual Checks
+- Browser route `/?mode=pet&variant=skyship-command-deck&pet=expanded`: clicking Close collapses chat and leaves the pet visible.
+- Browser route after close: dragging across the pet does not open chat on release.
+- Browser route after drag: a simple click on the pet still opens chat.
+
+#### Validation
+- `bun run lint`: passed.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-05 CST — Pet chat outside-dismiss and anchor adjustment
+
+#### Goal
+Address follow-up Pet Mode UX issues: remove the top-right close button, dismiss chat by clicking outside, and anchor the chat bubble closer to the character so it grows upward from the pet.
+
+#### Changed
+- Removed the production-visible close button from the Pet chat bubble.
+- Added Pet widget outside-click dismissal while keeping chat bubble controls protected by propagation stopping.
+- Changed the pet character click to toggle chat open/closed, while preserving drag-click suppression.
+- Re-anchored `.pet-chat-bubble` from a top-positioned overlay to a bottom-positioned overlay near the sprite.
+- Removed the unused close-button CSS and reduced message-list right padding now that the close control is gone.
+
+#### Manual Checks
+- Browser route `/?mode=pet&variant=skyship-command-deck&pet=expanded`: no close button is visible.
+- Clicking inside the input leaves chat open.
+- Clicking outside the chat bubble closes chat.
+- Clicking the pet reopens chat.
+- The chat overlay sits closer to the pet and extends upward from that anchor.
+
+#### Validation
+- `bun run lint`: passed.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
 ## Scope Guard
 Deferred:
 - multiple pets

@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { FormEvent, MouseEvent, PointerEvent } from 'react';
 import {
-  ExternalLink,
   Hammer,
-  MessageSquare,
   Search,
   ShieldCheck,
 } from 'lucide-react';
@@ -30,6 +29,7 @@ import type { Agent, ReportCard, SystemStatus, Task } from './types';
 const isPetWindowMode = () => new URLSearchParams(window.location.search).get('mode') === 'pet';
 const isPixelShowcaseMode = () => window.location.pathname === '/pixel-ui-showcase';
 const variantStorageKey = 'hermes-guild.jrpg-variant';
+const petHandoffStorageKey = 'hermes-guild.pet-handoff';
 type MainView = 'hall' | 'board' | 'review';
 
 const uiVariants = [
@@ -124,6 +124,14 @@ function persistVariant(variantId: VariantId) {
 async function focusGuildHallWindow() {
   if (!('__TAURI_INTERNALS__' in window)) return false;
 
+  const { invoke } = await import('@tauri-apps/api/core');
+  await invoke('show_hall_window');
+  return true;
+}
+
+async function focusGuildHallWindowWithWebviewFallback() {
+  if (!('__TAURI_INTERNALS__' in window)) return false;
+
   const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
   const mainWindow = await WebviewWindow.getByLabel('main');
   if (!mainWindow) return false;
@@ -139,6 +147,10 @@ async function startPetWindowDrag() {
 
   const { getCurrentWindow } = await import('@tauri-apps/api/window');
   await getCurrentWindow().startDragging();
+}
+
+function writePetHandoff(view: MainView, taskId?: string) {
+  window.localStorage.setItem(petHandoffStorageKey, JSON.stringify({ view, taskId, timestamp: Date.now() }));
 }
 
 const statusLabel: Record<string, string> = {
@@ -179,6 +191,29 @@ const questLogLabel: Record<string, string> = {
   approved: 'Quest accepted',
   revision_requested: 'Revision ordered',
   error: 'Quest failed',
+};
+
+const petStateCopy = {
+  idle: {
+    label: 'Ready',
+    message: 'Ready for a quest.',
+  },
+  thinking: {
+    label: 'Thinking',
+    message: 'Thinking...',
+  },
+  running: {
+    label: 'Running',
+    message: 'Working on your quest.',
+  },
+  needs_review: {
+    label: 'Review',
+    message: 'A quest is ready.',
+  },
+  error: {
+    label: 'Attention',
+    message: 'Something needs attention.',
+  },
 };
 
 function getExecutionSource(status: SystemStatus) {
@@ -225,14 +260,49 @@ function App() {
     persistVariant(selectedVariantId);
   }, [selectedVariantId]);
 
-  async function createPetQuest() {
-    if (!petInput.trim()) return;
+  useEffect(() => {
+    if (petOnly) return undefined;
+
+    const handlePetHandoff = (event: StorageEvent) => {
+      if (event.key !== petHandoffStorageKey || !event.newValue) return;
+
+      try {
+        const handoff = JSON.parse(event.newValue) as { view?: MainView; taskId?: string };
+        if (handoff.view !== 'hall' && handoff.view !== 'board' && handoff.view !== 'review') return;
+        if (handoff.taskId) setSelectedTaskId(handoff.taskId);
+        setActiveView(handoff.view);
+      } catch {
+        // Ignore malformed handoff values from older app sessions.
+      }
+    };
+
+    window.addEventListener('storage', handlePetHandoff);
+    return () => window.removeEventListener('storage', handlePetHandoff);
+  }, [petOnly]);
+
+  async function openMainView(view: MainView, taskId?: string) {
+    writePetHandoff(view, taskId);
+    const focusedNativeWindow = await focusGuildHallWindow()
+      .catch(() => focusGuildHallWindowWithWebviewFallback())
+      .catch(() => false);
+    if (!focusedNativeWindow) {
+      if (taskId) setSelectedTaskId(taskId);
+      setActiveView(view);
+    }
+  }
+
+  async function createPetQuest(options: { openHall?: boolean } = {}) {
+    if (!petInput.trim()) return undefined;
     const taskId = bridge.submitTask
       ? await bridge.submitTask({ brief: petInput.trim(), assigneeId: activeAgent.id, type: 'pet' })
       : bridge.createTask({ brief: petInput.trim(), assigneeId: activeAgent.id, type: 'pet' });
     setSelectedTaskId(taskId);
-    setActiveView('board');
     setPetInput('');
+    if (options.openHall !== false) {
+      setActiveView('board');
+      void openMainView('board', taskId);
+    }
+    return taskId;
   }
 
   async function createBoardQuest() {
@@ -256,10 +326,7 @@ function App() {
   }
 
   const openHall = async () => {
-    const focusedNativeWindow = await focusGuildHallWindow().catch(() => false);
-    if (!focusedNativeWindow) {
-      setActiveView('hall');
-    }
+    await openMainView('hall');
   };
 
   if (!petOnly && isPixelShowcaseMode()) {
@@ -271,16 +338,16 @@ function App() {
       <div className={`pet-window-shell ${selectedVariant.className}`} data-variant={selectedVariant.id}>
         <PetPanel
           activeAgent={activeAgent}
-          agents={snapshot.agents}
-          pendingCount={pendingReports.length}
+          activeQuest={activeQuest}
+          tasks={tasks}
+          pendingReports={pendingReports}
           petInput={petInput}
           onPetInput={setPetInput}
-          onCreateQuest={createPetQuest}
-          onProfileChange={(agentId) => {
-            bridge.setActiveProfile(agentId);
-            setBoardAssignee(agentId);
-          }}
+          onCreateQuest={() => createPetQuest({ openHall: false })}
           onOpenHall={openHall}
+          onOpenBoard={() => openMainView('board', activeQuest?.id)}
+          onOpenReview={() => openMainView('review')}
+          onOpenIssue={() => openMainView('board', activeQuest?.id)}
           bridgeReady={bridgeReady}
           nativeDragEnabled={petOnly}
         />
@@ -478,75 +545,392 @@ function BridgeStatusDetails({ status, config, bridgeReady, onConfigChange, onAp
 
 interface PetPanelProps {
   activeAgent: Agent;
-  agents: Agent[];
-  pendingCount: number;
+  activeQuest?: Task;
+  tasks: Task[];
+  pendingReports: ReportCard[];
   petInput: string;
   onPetInput: (value: string) => void;
-  onCreateQuest: () => void;
-  onProfileChange: (agentId: string) => void;
-  onOpenHall: () => void;
+  onCreateQuest: () => string | void | Promise<string | void>;
+  onOpenHall: () => void | Promise<void>;
+  onOpenBoard: () => void | Promise<void>;
+  onOpenReview: () => void | Promise<void>;
+  onOpenIssue: () => void | Promise<void>;
   bridgeReady: boolean;
   nativeDragEnabled: boolean;
 }
 
 function PetPanel({
   activeAgent,
-  agents,
-  pendingCount,
+  activeQuest,
+  tasks,
+  pendingReports,
   petInput,
   onPetInput,
   onCreateQuest,
-  onProfileChange,
   onOpenHall,
+  onOpenBoard,
+  onOpenReview,
+  onOpenIssue,
   bridgeReady,
   nativeDragEnabled,
 }: PetPanelProps) {
-  const Icon = roleIcon[activeAgent.role];
+  const [expanded, setExpanded] = useState(() => new URLSearchParams(window.location.search).get('pet') === 'expanded');
+  const [chatState, setChatState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
+  const [chatMessages, setChatMessages] = useState<PetChatMessage[]>([]);
+  const [lastSubmittedTaskId, setLastSubmittedTaskId] = useState<string | undefined>();
+  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerDraggingRef = useRef(false);
+  const suppressNextClickRef = useRef(false);
+  const lastDerivedMessageKeyRef = useRef<string | undefined>(undefined);
+  const messageListRef = useRef<HTMLDivElement | null>(null);
+  const petState = getPetDisplayState(activeAgent, activeQuest, pendingReports.length);
+  const copy = petStateCopy[petState];
+  const avatarClass = getPetAvatarAssetClass(activeAgent.role, petState);
+
+  useEffect(() => {
+    const derivedMessage = getPetAgentResponse({ activeAgent, activeQuest, pendingReports, tasks, lastSubmittedTaskId });
+    if (!derivedMessage || derivedMessage.key === lastDerivedMessageKeyRef.current) return;
+
+    lastDerivedMessageKeyRef.current = derivedMessage.key;
+    setChatMessages((messages) => trimPetMessages([...messages, derivedMessage.message]));
+    if (derivedMessage.state) {
+      setChatState(derivedMessage.state);
+    }
+  }, [activeAgent, activeQuest, lastSubmittedTaskId, pendingReports, tasks]);
+
+  useEffect(() => {
+    if (!expanded || chatMessages.length > 0) return;
+    const greetingKey = `greeting-${petState}-${pendingReports[0]?.id ?? activeQuest?.id ?? 'idle'}`;
+    if (lastDerivedMessageKeyRef.current === greetingKey) return;
+
+    lastDerivedMessageKeyRef.current = greetingKey;
+    setChatMessages([
+      {
+        id: greetingKey,
+        speaker: 'agent',
+        text: pendingReports.length > 0 ? `${pendingReports.length} report ready. Want to review it?` : copy.message,
+        tone: pendingReports.length > 0 ? 'review' : petState,
+      },
+    ]);
+  }, [activeQuest, chatMessages.length, copy.message, expanded, pendingReports, petState]);
+
+  useEffect(() => {
+    if (!expanded || !messageListRef.current) return;
+    messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
+  }, [chatMessages, expanded]);
+
+  const appendPetMessage = (message: PetChatMessage) => {
+    setChatMessages((messages) => trimPetMessages([...messages, message]));
+  };
+
+  const handleCreateQuest = async () => {
+    const submittedText = petInput.trim();
+    if (!submittedText || chatState === 'sending') return;
+    const submittedAt = Date.now();
+    setExpanded(true);
+    setChatState('sending');
+    setChatMessages([
+      {
+        id: `user-${submittedAt}`,
+        speaker: 'user',
+        text: submittedText,
+      },
+      {
+        id: `agent-sending-${submittedAt}`,
+        speaker: 'agent',
+        text: 'I am sending that to Hermes now.',
+        tone: 'thinking',
+      },
+    ]);
+    try {
+      const taskId = await onCreateQuest();
+      if (taskId) {
+        setLastSubmittedTaskId(taskId);
+      }
+      setChatState('sent');
+      setChatMessages((messages) =>
+        trimPetMessages([
+          ...messages.filter((message) => !message.id.startsWith('agent-sending-')),
+          {
+            id: `agent-accepted-${taskId ?? Date.now()}`,
+            speaker: 'agent',
+            text: taskId ? 'Quest accepted. I will keep updates here.' : 'I am still here. Add a quest when you are ready.',
+            tone: taskId ? 'running' : 'idle',
+          },
+        ]),
+      );
+    } catch {
+      setChatState('error');
+      appendPetMessage({
+        id: `agent-error-${Date.now()}`,
+        speaker: 'agent',
+        text: 'I could not send that quest. Open Hall for details if it keeps failing.',
+        tone: 'error',
+      });
+    }
+  };
+
+  const handlePetClick = (event?: MouseEvent<HTMLElement>) => {
+    if (suppressNextClickRef.current) {
+      suppressNextClickRef.current = false;
+      event?.preventDefault();
+      event?.stopPropagation();
+      return;
+    }
+    event?.stopPropagation();
+    setExpanded((isExpanded) => !isExpanded);
+  };
+
+  const handleWidgetClick = () => {
+    if (!expanded) return;
+    setExpanded(false);
+  };
+
+  const handleDoubleClick = () => {
+    void onOpenHall();
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
+    pointerStartRef.current = { x: event.clientX, y: event.clientY };
+    pointerDraggingRef.current = false;
+  };
+
+  const handlePointerMove = (event: PointerEvent<HTMLElement>) => {
+    if (!pointerStartRef.current) return;
+    const deltaX = Math.abs(event.clientX - pointerStartRef.current.x);
+    const deltaY = Math.abs(event.clientY - pointerStartRef.current.y);
+    if (deltaX + deltaY < 7) return;
+    pointerDraggingRef.current = true;
+    suppressNextClickRef.current = true;
+    pointerStartRef.current = null;
+    if (nativeDragEnabled) {
+      void startPetWindowDrag();
+    }
+  };
+
+  const handlePointerUp = () => {
+    if (pointerDraggingRef.current) {
+      suppressNextClickRef.current = true;
+    }
+    pointerStartRef.current = null;
+    pointerDraggingRef.current = false;
+  };
+
+  const handoffAction =
+    petState === 'needs_review'
+      ? { label: 'Review', icon: 'review' as const, action: onOpenReview }
+      : petState === 'error'
+        ? { label: 'Issue', icon: 'warning' as const, action: onOpenIssue }
+        : petState === 'running' || petState === 'thinking'
+          ? { label: 'Progress', icon: 'quest-log' as const, action: onOpenBoard }
+          : { label: 'Hall', icon: 'guild-hall' as const, action: onOpenHall };
+
+  const visibleMessages =
+    chatMessages.length > 0
+      ? chatMessages
+      : [
+          {
+            id: 'pet-greeting',
+            speaker: 'agent' as const,
+            text: pendingReports.length > 0 ? `${pendingReports.length} report ready. Want to review it?` : copy.message,
+            tone: pendingReports.length > 0 ? ('review' as const) : petState,
+          },
+        ];
 
   return (
-    <aside className={`pet-panel ${activeAgent.status}`}>
-      <div
-        className="drag-strip"
-        data-tauri-drag-region={nativeDragEnabled ? '' : undefined}
-        onMouseDown={() => {
-          if (nativeDragEnabled) void startPetWindowDrag();
-        }}
+    <aside
+      className={`pet-widget ${expanded ? 'bubble-open' : 'collapsed'} pet-state-${petState}`}
+      aria-label={`${activeAgent.name} companion, ${copy.label}`}
+      onDoubleClick={handleDoubleClick}
+      onClick={handleWidgetClick}
+    >
+      <button
+        type="button"
+        className="pet-character"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onClick={handlePetClick}
+        aria-label={`${activeAgent.name}: ${copy.message}`}
       >
-        Pet Mode
-      </div>
-      <div className="pet-avatar" aria-label={`${activeAgent.name} is ${statusLabel[activeAgent.status]}`}>
-        <Icon size={44} />
-        <span className="pulse-ring" />
-      </div>
-      <div className="pet-title">
-        <p>{activeAgent.role}</p>
-        <h2>{activeAgent.name}</h2>
-        <span>{statusLabel[activeAgent.status]}</span>
-      </div>
-      <select value={activeAgent.id} onChange={(event) => onProfileChange(event.target.value)} aria-label="Active profile">
-        {agents.map((agent) => (
-          <option key={agent.id} value={agent.id}>
-            {agent.name} - {agent.role}
-          </option>
-        ))}
-      </select>
-      <textarea
-        value={petInput}
-        onChange={(event) => onPetInput(event.target.value)}
-        placeholder="What should this agent do?"
-        rows={4}
-      />
-      <div className="pet-actions">
-        <button onClick={onCreateQuest} disabled={!bridgeReady}>
-          <MessageSquare size={16} /> Send
-        </button>
-        <button className="secondary" onClick={onOpenHall}>
-          <ExternalLink size={16} /> Hall
-        </button>
-      </div>
-      {pendingCount > 0 && <div className="return-card">{pendingCount} quest report waiting</div>}
+        <span className="pet-state-ring" aria-hidden="true" />
+        <span className={`pet-character-sprite ${avatarClass}`} aria-hidden="true" />
+      </button>
+
+      {expanded && (
+        <form
+          className={`pet-chat-bubble pet-chat-${chatState}`}
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+          onSubmit={(event: FormEvent<HTMLFormElement>) => {
+            event.preventDefault();
+            void handleCreateQuest();
+          }}
+        >
+          <div className="pet-message-list" ref={messageListRef} aria-live="polite">
+            {visibleMessages.map((message) => (
+              <div key={message.id} className={`pet-message pet-message-${message.speaker} ${message.tone ? `pet-message-${message.tone}` : ''}`}>
+                <span className="pet-message-speaker">{message.speaker === 'user' ? 'You' : activeAgent.name}</span>
+                <p>{message.text}</p>
+              </div>
+            ))}
+          </div>
+          {activeQuest && (
+            <div className="pet-chat-status" aria-label={`${activeQuest.title}: ${activeQuest.progress}% ${activeQuest.state.replace('_', ' ')}`}>
+              <span>{activeQuest.progress}%</span>
+              <span>{activeQuest.state.replace('_', ' ')}</span>
+            </div>
+          )}
+          <div className="pet-chat-row">
+            <PixelInput
+              className="pet-command-input"
+              value={petInput}
+              onChange={onPetInput}
+              placeholder="Ask Hermes..."
+              ariaLabel="Pet quick chat"
+            />
+            <PixelButton
+              className="pet-send-chip"
+              type="submit"
+              tone="primary"
+              disabled={!bridgeReady || !petInput.trim() || chatState === 'sending'}
+            >
+              <PixelIcon name="send" size={15} /> Send
+            </PixelButton>
+          </div>
+          <button type="button" className="pet-handoff-link" onClick={() => handoffAction.action()}>
+            <PixelIcon name={handoffAction.icon} size={14} /> Open {handoffAction.label}
+          </button>
+        </form>
+      )}
     </aside>
   );
+}
+
+type PetDisplayState = 'idle' | 'thinking' | 'running' | 'needs_review' | 'error';
+
+type PetChatMessage = {
+  id: string;
+  speaker: 'agent' | 'user';
+  text: string;
+  tone?: PetDisplayState | 'review' | 'completed';
+};
+
+function trimPetMessages(messages: PetChatMessage[]) {
+  const deduped = messages.filter((message, index, collection) => collection.findIndex((item) => item.id === message.id) === index);
+  return deduped.slice(-3);
+}
+
+function excerptPetText(text: string, maxLength = 190) {
+  const compact = text.replace(/\s+/g, ' ').trim();
+  if (compact.length <= maxLength) return compact;
+  return `${compact.slice(0, maxLength - 1).trimEnd()}...`;
+}
+
+function getPetAgentResponse({
+  activeAgent,
+  activeQuest,
+  pendingReports,
+  tasks,
+  lastSubmittedTaskId,
+}: {
+  activeAgent: Agent;
+  activeQuest?: Task;
+  pendingReports: ReportCard[];
+  tasks: Task[];
+  lastSubmittedTaskId?: string;
+}): { key: string; state?: 'sent' | 'error'; message: PetChatMessage } | undefined {
+  const matchingReport = lastSubmittedTaskId
+    ? pendingReports.find((report) => report.taskId === lastSubmittedTaskId)
+    : pendingReports[0];
+
+  if (matchingReport) {
+    const reportTask = tasks.find((task) => task.id === matchingReport.taskId);
+    const artifactOutput = matchingReport.artifacts.find((artifact) => artifact.kind === 'summary')?.description;
+    const output = matchingReport.summary || artifactOutput;
+    const text = output
+      ? `Returned output: ${excerptPetText(output)}`
+      : `${matchingReport.title} is ready for review.`;
+    return {
+      key: `report-${matchingReport.id}-${matchingReport.summary.length}-${artifactOutput?.length ?? 0}`,
+      state: 'sent',
+      message: {
+        id: `agent-report-${matchingReport.id}`,
+        speaker: 'agent',
+        text,
+        tone: reportTask?.state === 'approved' ? 'completed' : 'review',
+      },
+    };
+  }
+
+  const trackedTask = (lastSubmittedTaskId ? tasks.find((task) => task.id === lastSubmittedTaskId) : undefined) ?? activeQuest;
+  if (!trackedTask) return undefined;
+
+  if (trackedTask.state === 'error') {
+    const errorText = trackedTask.error ?? trackedTask.timeline.at(-1)?.message ?? 'Something needs attention.';
+    return {
+      key: `task-error-${trackedTask.id}-${trackedTask.updatedAt}-${errorText}`,
+      state: 'error',
+      message: {
+        id: `agent-error-${trackedTask.id}-${trackedTask.updatedAt}`,
+        speaker: 'agent',
+        text: excerptPetText(errorText, 150),
+        tone: 'error',
+      },
+    };
+  }
+
+  const latestUsefulEvent = [...trackedTask.timeline]
+    .reverse()
+    .find((event) => !['created', 'assigned'].includes(event.type) && event.message.trim().length > 0);
+
+  if (latestUsefulEvent) {
+    const eventText =
+      latestUsefulEvent.type === 'completed' || latestUsefulEvent.type === 'review_required'
+        ? latestUsefulEvent.message
+        : `${latestUsefulEvent.message} (${trackedTask.progress}%)`;
+    return {
+      key: `task-event-${trackedTask.id}-${latestUsefulEvent.id}-${trackedTask.progress}`,
+      state: 'sent',
+      message: {
+        id: `agent-event-${latestUsefulEvent.id}`,
+        speaker: 'agent',
+        text: excerptPetText(eventText, 160),
+        tone: trackedTask.state === 'needs_review' ? 'review' : trackedTask.state === 'running' ? 'running' : 'thinking',
+      },
+    };
+  }
+
+  if (!lastSubmittedTaskId && (trackedTask.state === 'created' || trackedTask.state === 'assigned')) {
+    return {
+      key: `task-accepted-${trackedTask.id}-${trackedTask.updatedAt}`,
+      state: 'sent',
+      message: {
+        id: `agent-task-${trackedTask.id}`,
+        speaker: 'agent',
+        text: `${activeAgent.name} accepted "${trackedTask.title}". I will post progress here.`,
+        tone: 'thinking',
+      },
+    };
+  }
+
+  return undefined;
+}
+
+function getPetDisplayState(activeAgent: Agent, activeQuest: Task | undefined, pendingReportCount: number): PetDisplayState {
+  if (activeQuest?.state === 'error' || activeAgent.status === 'error') return 'error';
+  if (pendingReportCount > 0 || activeAgent.status === 'needs_review') return 'needs_review';
+  if (activeQuest?.state === 'running' || activeAgent.status === 'running') return 'running';
+  if (activeQuest?.state === 'created' || activeQuest?.state === 'assigned' || activeAgent.status === 'thinking') return 'thinking';
+  return 'idle';
+}
+
+function getPetAvatarAssetClass(role: Agent['role'], petState: PetDisplayState) {
+  const roleAsset = role === 'Builder' ? 'builder' : role === 'Reviewer' ? 'scribe' : role === 'Researcher' ? 'scout' : 'gatherer';
+  const stateAsset = petState === 'needs_review' ? 'needs-review' : petState === 'running' ? 'running' : petState === 'error' ? 'error' : 'idle';
+  return `pet-avatar-${roleAsset}-${stateAsset}`;
 }
 
 interface GuildHallProps {

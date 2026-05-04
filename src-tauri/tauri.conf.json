@@ -18,18 +18,21 @@
         "width": 1280,
         "height": 820,
         "resizable": true,
-        "decorations": true
+        "decorations": true,
+        "visible": false
       },
       {
         "label": "pet",
         "title": "Hermes Pet",
         "url": "/?mode=pet",
-        "width": 360,
-        "height": 520,
+        "width": 460,
+        "height": 420,
         "resizable": false,
         "decorations": false,
         "transparent": true,
-        "alwaysOnTop": false
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false
       }
     ]
   }
