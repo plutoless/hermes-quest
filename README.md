@@ -1,6 +1,6 @@
 # Hermes Guild
 
-Hermes Guild is a desktop-native RPG workbench for AI agents. v0 proves one loop:
+Hermes Guild is a desktop-native pixel-art JRPG workbench for AI agents. v0 proves one loop:
 
 ```text
 Pet entry -> profile assignment -> quest execution -> timeline visibility -> report card review
@@ -82,14 +82,16 @@ Hermes Guild now has three bridge modes:
 - `real`: uses the Hermes API server.
 - `auto`: tries real Hermes first and falls back to mock when Hermes is unavailable.
 
-The default mode is `auto`. The top system strip includes the bridge selector, Hermes API base URL field, and Apply button. It also shows:
+The default mode is `auto`. The production Guild Hall keeps bridge truth compact: a titlebar status chip plus a small Integration Truth strip. Bridge configuration is tucked behind the titlebar status details instead of appearing as an always-visible Apply-style control. The visible truth data includes:
 
 - selected mode: `mock`, `real`, or `auto`
 - active implementation: `mock`, `real`, or `loading`
 - Hermes availability: `available`, `unavailable`, or `unchecked`
 - fallback reason, only when auto mode falls back
+- profile data source: Guild-defined roles
+- execution source: mock bridge, mock fallback, bridge loading, or Real Hermes API
 
-Changing the selector writes bridge config to browser/Tauri local storage under `hermes-guild.bridge-config` and rebuilds the active bridge immediately. You can also seed the same config in dev tools:
+Changing the mode in bridge status details and pressing `Save` writes bridge config to browser/Tauri local storage under `hermes-guild.bridge-config` and rebuilds the active bridge. You can also seed the same config in dev tools:
 
 ```js
 localStorage.setItem('hermes-guild.bridge-config', JSON.stringify({
@@ -124,19 +126,70 @@ Use `docs/NATIVE_VERIFICATION.md` for the native pass/fail checklist after those
 ## What Works
 
 - One active Pet Mode profile.
+- Reusable Pixel UI Kit layer for the main Guild Hall surface: pixel app window, asset-framed panels, buttons, inputs, badges, avatar, quest card, log list, review card, truth strip, and command bar.
+- Low-density pixel JRPG visual treatment: one cohesive desktop app window, one focused Guild Hall active companion, one active quest, compact quest report/review panel, Quest Board entry, quest log timeline, mission-result report card, and Review Chamber.
+- 8 reviewable JRPG visual variants selectable in-app or by URL.
 - In mock mode, profile switcher for mock profiles Lyra / Researcher, Brass / Builder, and Sable / Reviewer.
 - In real mode, profile switcher for Hermes-mapped Guild roles: Hermes Researcher, Hermes Builder, and Hermes Reviewer.
 - Pet task input creates a quest through the selected bridge and assigns it to the active profile.
-- Guild Hall shows active profile, active quest, pending reviews, and character cards.
-- Quest Board shows direct task creation, optional advanced brief fields, task list, detail, artifacts, blocked/error states, and timeline.
+- Guild Hall shows one active companion, one active quest, a compact returned-report panel with approve/revise actions, recent quest log highlights, visible integration truth, and a bottom command input.
+- The empty active quest state includes suggested prompt chips that fill the command input without creating a task until Send is pressed.
+- Character cards show role/class, current state, current quest, traits, equipment, and a truth label that Guild roles do not imply live Hermes profile routing.
+- Quest Board shows direct task creation, optional advanced brief fields, task list, detail, artifacts, blocked/error states, and quest log timeline.
 - Mock lifecycle events drive thinking/running/needs-review states.
-- Review shows Quest Report Cards with artifacts, facts, assumptions, known gaps, and review items.
+- Review shows Quest Report Cards with artifacts, facts, assumptions, known gaps, review items, approve/revise actions, and real-vs-mock output provenance.
 - Approve marks a report approved.
 - Revise creates a new mock execution pass for the same profile.
-- Block button emits a visible mock blocked state.
-- Error button emits a visible mock gateway error.
+- Mock blocked/error lifecycle methods remain in the bridge and tests; production-visible debug buttons are not shown on the default Guild Hall.
 - Auto bridge mode falls back to mock when native Hermes is not available.
 - Real bridge mode can run Hermes API tasks when the Hermes API server is available.
+
+## Pixel UI Review
+
+The focused high-fidelity screen is the default Guild Hall at:
+
+```text
+/?variant=skyship-command-deck
+```
+
+The unified Quest Board screen can be opened directly for review at:
+
+```text
+/?variant=skyship-command-deck&view=board
+```
+
+The reusable Pixel UI Kit showcase is available at:
+
+```text
+/pixel-ui-showcase
+```
+
+The kit direction is documented in `docs/PIXEL_UI_KIT.md`; the asset extraction plan is documented in `docs/PIXEL_UI_KIT_ASSET_IMPLEMENTATION.md`; the one-screen fidelity pass is documented in `docs/WEB_FIDELITY_PASS.md`.
+
+Extracted reusable assets are stored under:
+
+```text
+src/assets/pixel-ui/frames/
+src/assets/pixel-ui/buttons/
+src/assets/pixel-ui/inputs/
+src/assets/pixel-ui/badges/
+src/assets/pixel-ui/icons/
+src/assets/pixel-ui/avatars/
+src/assets/pixel-ui/mascots/
+src/assets/pixel-ui/textures/
+```
+
+Generated source sheets and design reference boards are not committed to the production repo. Keep extracted, transparent, reusable UI assets here; avoid checking in prompt reference boards, screenshot sheets, `.DS_Store`, or unused cropped fragments.
+
+`src/styles/pixel-assets.css` applies the extracted assets with CSS `border-image` / `border-image-slice` for resizable panel, button, input, and badge chrome, plus `image-rendering: pixelated` for pixel assets.
+
+Guild Hall and Quest Board now share the same production-style desktop window, app header, compact bridge status, pixel panels, status strip, and command/control treatment. Debug-style controls such as the old `Hall / Board / Review / Error / Block` tab row and the large Pet Mode side panel are not part of the first screen.
+
+The production screens intentionally avoid using noisy source-sheet labels or embedded UI text from cropped assets. Extracted assets provide reusable chrome, icons, avatars, badges, and controls; readable app text is rendered by React/CSS. Navigation strips and section headers use clean CSS pixel rules where cropped source assets would expose ghost labels or visual noise.
+
+Standalone icon, avatar, and mascot PNGs are cleaned as transparent RGBA assets so they can render on both navy and parchment surfaces. The cleanup helper is `scripts/cleanup-pixel-assets.py`; it flood-fills edge backgrounds, trims alpha bounds, and removes small source-sheet label fragments while keeping stable filenames.
+
+Avatar rendering uses a shared `PixelAvatarFrame` / `PixelAvatar` safe area: fixed frame, centered transparent sprite, contained background sizing, hidden overflow, and pixelated rendering. This keeps the existing character identity while aligning idle/running/needs-review/error states in the same frame.
 
 ## What Is Mocked
 
@@ -157,3 +210,26 @@ Use `docs/NATIVE_VERIFICATION.md` for the native pass/fail checklist after those
 - Hermes API failures are surfaced as task, pet, timeline, and system errors.
 
 The real bridge is intentionally minimal: no Hermes WebUI parity, skill management, memory UI, gateway UI, workspace browser, Tavern, Infirmary, or multi-agent orchestration.
+
+## JRPG Variant Preview
+
+The default UI opens on `04 · Skyship Command Deck`, now used as the low-density desktop-native pixel JRPG companion workbench direction. To keep the default screen focused, preview the older variant set by direct URL:
+
+| # | Variant | How to view |
+| --- | --- | --- |
+| 01 | Royal Guild Hall | `/?variant=royal-guild-hall` |
+| 02 | Magitech Workshop | `/?variant=magitech-workshop` |
+| 03 | Moon Crystal Sanctuary | `/?variant=moon-crystal-sanctuary` |
+| 04 | Skyship Command Deck | `/?variant=skyship-command-deck` |
+| 05 | Arcane Archive Library | `/?variant=arcane-archive-library` |
+| 06 | Mercenary Camp | `/?variant=mercenary-camp` |
+| 07 | Dungeon Strategy Terminal | `/?variant=dungeon-strategy-terminal` |
+| 08 | Cozy Inn Guild | `/?variant=cozy-inn-guild` |
+
+Pet-only review also supports variants, for example:
+
+```text
+/?mode=pet&variant=cozy-inn-guild
+```
+
+The low-density direction is documented in `docs/LOW_DENSITY_PIXEL_JRPG_UI.md`. It intentionally favors one active companion, one active quest, one compact review/result surface, and a small integration truth block over the earlier dense concept-board/HUD layout.

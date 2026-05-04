@@ -1,0 +1,258 @@
+.pixel-art,
+.pixel-icon,
+.pixel-avatar,
+.pixel-avatar-image,
+.pixel-mascot,
+.pixel-frame,
+.pixel-panel,
+.pixel-button,
+.pixel-input,
+.pixel-badge {
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.pixel-panel {
+  border-image-source: url("../assets/pixel-ui/frames/panel-parchment-9slice.png");
+  border-image-slice: 24 fill;
+  border-image-repeat: stretch;
+}
+
+.pixel-panel-dark,
+.pixel-truth-strip {
+  border-image-source: url("../assets/pixel-ui/frames/panel-dark-9slice.png");
+  border-image-slice: 24 fill;
+  border-image-repeat: stretch;
+}
+
+.pixel-panel-inset {
+  border-image-source: url("../assets/pixel-ui/frames/panel-inset.png");
+  border-image-slice: 18 fill;
+}
+
+.pixel-app-titlebar {
+  position: relative;
+}
+
+.pixel-app-titlebar::after {
+  content: "";
+  position: absolute;
+  right: 16px;
+  bottom: -9px;
+  left: 16px;
+  height: 10px;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, transparent, rgba(201, 155, 75, 0.74) 12%, rgba(101, 199, 198, 0.44) 50%, rgba(201, 155, 75, 0.74) 88%, transparent),
+    linear-gradient(180deg, transparent 0 3px, rgba(255, 232, 166, 0.26) 3px 5px, transparent 5px);
+  opacity: 0.5;
+}
+
+.pixel-section-header {
+  position: relative;
+}
+
+.pixel-section-header::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 4px;
+  min-width: 28px;
+  border-top: 2px solid rgba(125, 86, 37, 0.34);
+  border-bottom: 1px solid rgba(255, 246, 219, 0.34);
+  background: none;
+  opacity: 0.9;
+}
+
+.pixel-button {
+  border-width: 10px;
+  border-image-source: url("../assets/pixel-ui/buttons/button-primary.png");
+  border-image-slice: 14;
+  border-image-repeat: stretch;
+}
+
+.pixel-button-secondary {
+  border-image-source: url("../assets/pixel-ui/buttons/button-secondary.png");
+}
+
+.pixel-button-success {
+  border-image-source: url("../assets/pixel-ui/buttons/button-approve.png");
+}
+
+.pixel-button-danger {
+  border-image-source: url("../assets/pixel-ui/buttons/button-revise.png");
+}
+
+.pixel-button-ghost {
+  border-image-source: url("../assets/pixel-ui/buttons/button-ghost.png");
+}
+
+.pixel-input {
+  border-width: 8px;
+  border-image-source: url("../assets/pixel-ui/inputs/command-input-frame.png");
+  border-image-slice: 12;
+  border-image-repeat: stretch;
+}
+
+.pixel-select {
+  border: 8px solid transparent;
+  border-image: url("../assets/pixel-ui/inputs/dropdown-frame.png") 12 / 8px stretch;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+.pixel-input-multiline,
+.quest-post-panel .pixel-input {
+  border-image-source: url("../assets/pixel-ui/inputs/textarea-parchment-frame.png");
+  border-image-slice: 18;
+}
+
+.pixel-badge {
+  border-width: 8px;
+  border-image-source: url("../assets/pixel-ui/badges/badge-idle.png");
+  border-image-slice: 12;
+  border-image-repeat: stretch;
+}
+
+.pixel-badge-running,
+.pixel-badge-thinking,
+.pixel-badge-real,
+.pixel-badge-available {
+  border-image-source: url("../assets/pixel-ui/badges/badge-running.png");
+}
+
+.pixel-badge-needs_review,
+.pixel-badge-required {
+  border-image-source: url("../assets/pixel-ui/badges/badge-review.png");
+}
+
+.pixel-badge-error,
+.pixel-badge-unavailable {
+  border-image-source: url("../assets/pixel-ui/badges/badge-error.png");
+}
+
+.pixel-badge-approved {
+  border-image-source: url("../assets/pixel-ui/badges/badge-approved.png");
+}
+
+.pixel-badge-real {
+  border-image-source: url("../assets/pixel-ui/badges/badge-real.png");
+}
+
+.pixel-badge-mock {
+  border-image-source: url("../assets/pixel-ui/badges/badge-mock.png");
+}
+
+.pixel-badge-auto {
+  border-image-source: url("../assets/pixel-ui/badges/badge-auto.png");
+}
+
+.pixel-badge-fallback,
+.pixel-badge-blocked,
+.pixel-badge-unchecked {
+  border-image-source: url("../assets/pixel-ui/badges/badge-fallback.png");
+}
+
+.pixel-chip {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 32px;
+  padding: 4px 10px;
+  border: 8px solid transparent;
+  border-image: url("../assets/pixel-ui/badges/chip-role.png") 12 / 8px stretch;
+  background: #17263d;
+  color: #f6e5bd;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+  image-rendering: pixelated;
+}
+
+.pixel-icon,
+.pixel-mascot,
+.pixel-avatar-image {
+  display: inline-block;
+  flex: 0 0 auto;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+.pixel-icon {
+  width: var(--pixel-icon-size, 28px);
+  height: var(--pixel-icon-size, 28px);
+}
+
+.pixel-mascot {
+  width: var(--pixel-mascot-size, 82px);
+  height: var(--pixel-mascot-size, 82px);
+}
+
+.pixel-avatar-image {
+  width: 100%;
+  height: 100%;
+  background-position: center center;
+  background-size: contain;
+}
+
+.pixel-avatar-sprite .pixel-avatar-image {
+  width: 100%;
+  height: 100%;
+}
+
+.pixel-icon-guild-hall { background-image: url("../assets/pixel-ui/icons/guild-hall.png"); }
+.pixel-icon-quest-board { background-image: url("../assets/pixel-ui/icons/quest-board.png"); }
+.pixel-icon-review { background-image: url("../assets/pixel-ui/icons/review.png"); }
+.pixel-icon-quest { background-image: url("../assets/pixel-ui/icons/quest.png"); }
+.pixel-icon-quest-log { background-image: url("../assets/pixel-ui/icons/quest-log.png"); }
+.pixel-icon-report { background-image: url("../assets/pixel-ui/icons/report.png"); }
+.pixel-icon-companion { background-image: url("../assets/pixel-ui/icons/companion.png"); }
+.pixel-icon-settings { background-image: url("../assets/pixel-ui/icons/settings.png"); }
+.pixel-icon-diagnostics { background-image: url("../assets/pixel-ui/icons/diagnostics.png"); }
+.pixel-icon-bridge-real { background-image: url("../assets/pixel-ui/icons/bridge-real.png"); }
+.pixel-icon-bridge-mock { background-image: url("../assets/pixel-ui/icons/bridge-mock.png"); }
+.pixel-icon-bridge-auto { background-image: url("../assets/pixel-ui/icons/bridge-auto.png"); }
+.pixel-icon-hermes-available { background-image: url("../assets/pixel-ui/icons/hermes-available.png"); }
+.pixel-icon-hermes-unavailable { background-image: url("../assets/pixel-ui/icons/hermes-unavailable.png"); }
+.pixel-icon-no-fallback { background-image: url("../assets/pixel-ui/icons/no-fallback.png"); }
+.pixel-icon-returned { background-image: url("../assets/pixel-ui/icons/returned.png"); }
+.pixel-icon-approved { background-image: url("../assets/pixel-ui/icons/approved.png"); }
+.pixel-icon-revise { background-image: url("../assets/pixel-ui/icons/revise.png"); }
+.pixel-icon-error { background-image: url("../assets/pixel-ui/icons/error.png"); }
+.pixel-icon-warning { background-image: url("../assets/pixel-ui/icons/warning.png"); }
+.pixel-icon-search { background-image: url("../assets/pixel-ui/icons/search.png"); }
+.pixel-icon-close { background-image: url("../assets/pixel-ui/icons/close.png"); }
+.pixel-icon-minimize { background-image: url("../assets/pixel-ui/icons/minimize.png"); }
+.pixel-icon-maximize { background-image: url("../assets/pixel-ui/icons/maximize.png"); }
+.pixel-icon-dropdown-arrow { background-image: url("../assets/pixel-ui/icons/dropdown-arrow.png"); }
+.pixel-icon-chevron { background-image: url("../assets/pixel-ui/icons/chevron.png"); }
+.pixel-icon-plus { background-image: url("../assets/pixel-ui/icons/plus.png"); }
+.pixel-icon-send { background-image: url("../assets/pixel-ui/icons/send.png"); }
+.pixel-icon-document { background-image: url("../assets/pixel-ui/icons/document.png"); }
+.pixel-icon-scroll { background-image: url("../assets/pixel-ui/icons/scroll.png"); }
+.pixel-icon-seal { background-image: url("../assets/pixel-ui/icons/seal.png"); }
+.pixel-icon-feather-pen { background-image: url("../assets/pixel-ui/icons/feather-pen.png"); }
+.pixel-icon-spark { background-image: url("../assets/pixel-ui/icons/spark.png"); }
+
+.pixel-avatar-image-builder-idle { background-image: url("../assets/pixel-ui/avatars/builder-idle.png"); }
+.pixel-avatar-image-builder-running { background-image: url("../assets/pixel-ui/avatars/builder-running.png"); }
+.pixel-avatar-image-builder-needs-review { background-image: url("../assets/pixel-ui/avatars/builder-needs-review.png"); }
+.pixel-avatar-image-builder-error { background-image: url("../assets/pixel-ui/avatars/builder-error.png"); }
+.pixel-avatar-image-scout-idle { background-image: url("../assets/pixel-ui/avatars/scout-idle.png"); }
+.pixel-avatar-image-scout-running { background-image: url("../assets/pixel-ui/avatars/scout-running.png"); }
+.pixel-avatar-image-scout-needs-review { background-image: url("../assets/pixel-ui/avatars/scout-needs-review.png"); }
+.pixel-avatar-image-scout-error { background-image: url("../assets/pixel-ui/avatars/scout-error.png"); }
+.pixel-avatar-image-scribe-idle { background-image: url("../assets/pixel-ui/avatars/scribe-idle.png"); }
+.pixel-avatar-image-scribe-running { background-image: url("../assets/pixel-ui/avatars/scribe-running.png"); }
+.pixel-avatar-image-scribe-needs-review { background-image: url("../assets/pixel-ui/avatars/scribe-needs-review.png"); }
+.pixel-avatar-image-scribe-error { background-image: url("../assets/pixel-ui/avatars/scribe-error.png"); }
+.pixel-avatar-image-gatherer-idle { background-image: url("../assets/pixel-ui/avatars/gatherer-idle.png"); }
+.pixel-avatar-image-gatherer-running { background-image: url("../assets/pixel-ui/avatars/gatherer-running.png"); }
+.pixel-avatar-image-gatherer-needs-review { background-image: url("../assets/pixel-ui/avatars/gatherer-needs-review.png"); }
+.pixel-avatar-image-gatherer-error { background-image: url("../assets/pixel-ui/avatars/gatherer-error.png"); }
+
+.pixel-mascot-owl-idle { background-image: url("../assets/pixel-ui/mascots/owl-idle.png"); }
+.pixel-mascot-owl-running { background-image: url("../assets/pixel-ui/mascots/owl-running.png"); }
+.pixel-mascot-owl-needs-review { background-image: url("../assets/pixel-ui/mascots/owl-needs-review.png"); }
+.pixel-mascot-owl-error { background-image: url("../assets/pixel-ui/mascots/owl-error.png"); }

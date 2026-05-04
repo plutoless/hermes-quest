@@ -1,26 +1,125 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle,
-  Check,
-  ChevronRight,
-  CirclePause,
-  ClipboardList,
   ExternalLink,
-  FileText,
-  Flag,
   Hammer,
   MessageSquare,
-  RefreshCcw,
-  ScrollText,
   Search,
   ShieldCheck,
-  Sparkles,
 } from 'lucide-react';
 import { useBridgeSnapshot } from './hooks/useBridgeSnapshot';
+import {
+  PixelAppWindow,
+  PixelAvatar,
+  PixelBadge,
+  PixelButton,
+  PixelChip,
+  PixelCommandBar,
+  PixelIcon,
+  PixelInput,
+  PixelLogList,
+  PixelMascot,
+  PixelPanel,
+  PixelQuestCard,
+  PixelReviewCard,
+  PixelSelect,
+  PixelTruthStrip,
+} from './ui/pixel';
 import type { BridgeConfig, BridgeMode } from './bridge/types';
 import type { Agent, ReportCard, SystemStatus, Task } from './types';
 
 const isPetWindowMode = () => new URLSearchParams(window.location.search).get('mode') === 'pet';
+const isPixelShowcaseMode = () => window.location.pathname === '/pixel-ui-showcase';
+const variantStorageKey = 'hermes-guild.jrpg-variant';
+type MainView = 'hall' | 'board' | 'review';
+
+const uiVariants = [
+  {
+    id: 'royal-guild-hall',
+    number: '01',
+    name: 'Royal Guild Hall',
+    className: 'variant-royal',
+    preview: 'Classic heroic guild headquarters with noble parchment panels.',
+  },
+  {
+    id: 'magitech-workshop',
+    number: '02',
+    name: 'Magitech Workshop',
+    className: 'variant-magitech',
+    preview: 'Arcane machine console with blueprint grids and rune-tech diagnostics.',
+  },
+  {
+    id: 'moon-crystal-sanctuary',
+    number: '03',
+    name: 'Moon Crystal Sanctuary',
+    className: 'variant-sanctuary',
+    preview: 'Quiet moonlit temple with crystal frames and ceremonial review surfaces.',
+  },
+  {
+    id: 'skyship-command-deck',
+    number: '04',
+    name: 'Skyship Command Deck',
+    className: 'variant-skyship',
+    preview: 'Low-density companion workbench with one active quest and a compact review log.',
+  },
+  {
+    id: 'arcane-archive-library',
+    number: '05',
+    name: 'Arcane Archive Library',
+    className: 'variant-archive',
+    preview: 'Scholar guild ledgers, book panels, and annotated archive reports.',
+  },
+  {
+    id: 'mercenary-camp',
+    number: '06',
+    name: 'Mercenary Camp',
+    className: 'variant-camp',
+    preview: 'Frontier outpost with notice-board quests and stamped field reports.',
+  },
+  {
+    id: 'dungeon-strategy-terminal',
+    number: '07',
+    name: 'Dungeon Strategy Terminal',
+    className: 'variant-dungeon',
+    preview: 'Tactical dungeon console with grid-heavy logs and mission-clear results.',
+  },
+  {
+    id: 'cozy-inn-guild',
+    number: '08',
+    name: 'Cozy Inn Guild',
+    className: 'variant-inn',
+    preview: 'Warm town inn guild base with soft ledgers and companion-forward pet mode.',
+  },
+] as const;
+
+type VariantId = (typeof uiVariants)[number]['id'];
+
+function isVariantId(value: string | null): value is VariantId {
+  return uiVariants.some((variant) => variant.id === value);
+}
+
+function getInitialVariant(): VariantId {
+  const params = new URLSearchParams(window.location.search);
+  const queryVariant = params.get('variant');
+  if (isVariantId(queryVariant)) return queryVariant;
+
+  const storedVariant = window.localStorage.getItem(variantStorageKey);
+  if (isVariantId(storedVariant)) return storedVariant;
+
+  return 'skyship-command-deck';
+}
+
+function getInitialView(): MainView {
+  const queryView = new URLSearchParams(window.location.search).get('view');
+  if (queryView === 'board' || queryView === 'review') return queryView;
+  return 'hall';
+}
+
+function persistVariant(variantId: VariantId) {
+  window.localStorage.setItem(variantStorageKey, variantId);
+  const url = new URL(window.location.href);
+  url.searchParams.set('variant', variantId);
+  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+}
 
 async function focusGuildHallWindow() {
   if (!('__TAURI_INTERNALS__' in window)) return false;
@@ -54,6 +153,12 @@ const statusLabel: Record<string, string> = {
   approved: 'Approved',
 };
 
+const viewTitle = {
+  hall: 'Guild Hall',
+  board: 'Quest Board',
+  review: 'Review Chamber',
+};
+
 const roleIcon = {
   Researcher: Search,
   Builder: Hammer,
@@ -62,22 +167,32 @@ const roleIcon = {
 
 const isActionableReportTask = (task: Task | undefined) => task?.state === 'needs_review' && task.reviewStatus === 'required';
 
-function BridgeStatus({ status }: { status: SystemStatus }) {
-  return (
-    <span className="bridge-status">
-      <strong>{status.bridgeMode}</strong>
-      <span>impl: {status.activeImplementation}</span>
-      <span>Hermes: {status.hermesAvailable}</span>
-      {status.fallbackReason && <span>fallback: {status.fallbackReason}</span>}
-      <span>{status.logsSummary}</span>
-    </span>
-  );
+const questLogLabel: Record<string, string> = {
+  created: 'Quest posted',
+  assigned: 'Assigned to character',
+  started: 'Expedition started',
+  progress: 'Field note',
+  blocked: 'Route blocked',
+  artifact: 'Artifact found',
+  completed: 'Quest completed',
+  review_required: 'Returned to Guild',
+  approved: 'Quest accepted',
+  revision_requested: 'Revision ordered',
+  error: 'Quest failed',
+};
+
+function getExecutionSource(status: SystemStatus) {
+  if (status.activeImplementation === 'real') return 'Real Hermes API';
+  if (status.bridgeMode === 'auto' && status.activeImplementation === 'mock') return 'Mock fallback';
+  if (status.activeImplementation === 'loading') return 'Bridge loading';
+  return 'Mock bridge';
 }
 
 function App() {
   const { snapshot, lastEvent, bridge, bridgeReady, bridgeConfig, applyBridgeConfig } = useBridgeSnapshot();
-  const [activeView, setActiveView] = useState<'hall' | 'board' | 'review'>('hall');
+  const [activeView, setActiveView] = useState<MainView>(getInitialView);
   const [petOnly] = useState(isPetWindowMode);
+  const [selectedVariantId] = useState<VariantId>(getInitialVariant);
   const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
   const [petInput, setPetInput] = useState('Help me prepare a newbro demo brief.');
   const [boardInput, setBoardInput] = useState('');
@@ -100,10 +215,15 @@ function App() {
     const task = tasks.find((item) => item.id === report.taskId);
     return isActionableReportTask(task);
   });
+  const selectedVariant = uiVariants.find((variant) => variant.id === selectedVariantId) ?? uiVariants[0];
 
   useEffect(() => {
     setDraftBridgeConfig(bridgeConfig);
   }, [bridgeConfig]);
+
+  useEffect(() => {
+    persistVariant(selectedVariantId);
+  }, [selectedVariantId]);
 
   async function createPetQuest() {
     if (!petInput.trim()) return;
@@ -142,9 +262,13 @@ function App() {
     }
   };
 
+  if (!petOnly && isPixelShowcaseMode()) {
+    return <PixelShowcase />;
+  }
+
   if (petOnly) {
     return (
-      <div className="pet-window-shell">
+      <div className={`pet-window-shell ${selectedVariant.className}`} data-variant={selectedVariant.id}>
         <PetPanel
           activeAgent={activeAgent}
           agents={snapshot.agents}
@@ -164,84 +288,78 @@ function App() {
     );
   }
 
+  if (activeView === 'hall') {
+    return (
+      <div className={`main-window-shell ${selectedVariant.className}`} data-variant={selectedVariant.id}>
+        <GuildHall
+          agents={snapshot.agents}
+          activeAgent={activeAgent}
+          activeQuest={activeQuest}
+          pendingReports={pendingReports}
+          tasks={tasks}
+          systemStatus={snapshot.systemStatus}
+          bridgeConfig={draftBridgeConfig}
+          bridgeReady={bridgeReady}
+          onBridgeConfigChange={setDraftBridgeConfig}
+          onApplyBridgeConfig={() => applyBridgeConfig(draftBridgeConfig)}
+          onSelectAgent={(agentId) => {
+            bridge.setActiveProfile(agentId);
+            setBoardAssignee(agentId);
+          }}
+          onOpenTask={(taskId) => {
+            setSelectedTaskId(taskId);
+            setActiveView('board');
+          }}
+          onOpenBoard={() => setActiveView('board')}
+          onOpenReview={() => setActiveView('review')}
+          revisionText={revisionText}
+          onRevisionText={setRevisionText}
+          onApprove={(reportId) => bridge.approveReport(reportId)}
+          onRevise={(reportId) => {
+            bridge.requestRevision(reportId, revisionText);
+            setActiveView('board');
+          }}
+          commandValue={petInput}
+          onCommandValue={setPetInput}
+          onCreateQuest={createPetQuest}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="app-shell">
-      <PetPanel
-        activeAgent={activeAgent}
-        agents={snapshot.agents}
-        pendingCount={pendingReports.length}
-        petInput={petInput}
-        onPetInput={setPetInput}
-        onCreateQuest={createPetQuest}
-        onProfileChange={(agentId) => {
-          bridge.setActiveProfile(agentId);
-          setBoardAssignee(agentId);
-        }}
-        onOpenHall={openHall}
-        bridgeReady={bridgeReady}
-        nativeDragEnabled={petOnly}
-      />
-
-      <main className="guild-shell">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Hermes Guild</p>
-            <h1>{activeView === 'hall' ? 'Guild Hall' : activeView === 'board' ? 'Quest Board' : 'Review'}</h1>
-          </div>
-          <div className="system-strip">
-            <span className={`status-dot ${snapshot.systemStatus.gatewayStatus}`} />
-            <div className="bridge-panel">
-              <BridgeStatus status={snapshot.systemStatus} />
-              <BridgeControls
-                config={draftBridgeConfig}
-                bridgeReady={bridgeReady}
-                onConfigChange={setDraftBridgeConfig}
-                onApply={() => applyBridgeConfig(draftBridgeConfig)}
-              />
-            </div>
-          </div>
-        </header>
-
-        <nav className="tabs" aria-label="Main views">
-          <button className={activeView === 'hall' ? 'active' : ''} onClick={() => setActiveView('hall')}>
-            <Sparkles size={16} /> Hall
-          </button>
-          <button className={activeView === 'board' ? 'active' : ''} onClick={() => setActiveView('board')}>
-            <ClipboardList size={16} /> Board
-          </button>
-          <button className={activeView === 'review' ? 'active' : ''} onClick={() => setActiveView('review')}>
-            <ScrollText size={16} /> Review
-            {pendingReports.length > 0 && <strong>{pendingReports.length}</strong>}
-          </button>
-          <button className="ghost" onClick={() => bridge.simulateError(selectedTask?.id)} title="Simulate bridge error" disabled={!bridgeReady}>
-            <AlertTriangle size={16} /> Error
-          </button>
-          <button className="ghost" onClick={() => bridge.simulateBlocked(selectedTask?.id)} title="Simulate blocked state" disabled={!bridgeReady}>
-            <CirclePause size={16} /> Block
-          </button>
-        </nav>
-
-        {activeView === 'hall' && (
-          <GuildHall
-            agents={snapshot.agents}
-            activeAgent={activeAgent}
-            activeQuest={activeQuest}
-            pendingReports={pendingReports}
-            tasks={tasks}
-            onSelectAgent={(agentId) => bridge.setActiveProfile(agentId)}
-            onOpenTask={(taskId) => {
-              setSelectedTaskId(taskId);
-              setActiveView('board');
-            }}
+    <div className={`main-window-shell ${selectedVariant.className}`} data-variant={selectedVariant.id}>
+      <PixelAppWindow
+        className="pixel-guild-window pixel-workbench-window"
+        title="Hermes Guild"
+        subtitle={`${viewTitle[activeView]} · Companion Workbench`}
+        status={
+          <BridgeStatusDetails
+            status={snapshot.systemStatus}
+            config={draftBridgeConfig}
+            bridgeReady={bridgeReady}
+            onConfigChange={setDraftBridgeConfig}
+            onApply={() => applyBridgeConfig(draftBridgeConfig)}
+          />
+        }
+        toolbar={
+          <AppHeader
+            activeView={activeView}
+            pendingCount={pendingReports.length}
+            onOpenHall={() => setActiveView('hall')}
+            onOpenBoard={() => setActiveView('board')}
             onOpenReview={() => setActiveView('review')}
           />
-        )}
+        }
+      >
+        <main className="workbench-screen">
 
         {activeView === 'board' && (
           <QuestBoard
             agents={snapshot.agents}
             tasks={tasks}
             selectedTask={selectedTask}
+            systemStatus={snapshot.systemStatus}
             boardInput={boardInput}
             boardGoals={boardGoals}
             boardNonGoals={boardNonGoals}
@@ -281,48 +399,80 @@ function App() {
             <time>{new Date(lastEvent.timestamp).toLocaleTimeString()}</time>
           </footer>
         )}
-      </main>
+        </main>
+      </PixelAppWindow>
     </div>
   );
 }
 
-interface BridgeControlsProps {
+interface AppHeaderProps {
+  activeView: MainView;
+  pendingCount: number;
+  onOpenHall: () => void;
+  onOpenBoard: () => void;
+  onOpenReview: () => void;
+}
+
+function AppHeader({ activeView, pendingCount, onOpenHall, onOpenBoard, onOpenReview }: AppHeaderProps) {
+  return (
+    <div className="pixel-main-toolbar app-header">
+      <span>{viewTitle[activeView]}</span>
+      <div>
+        <PixelButton type="button" tone={activeView === 'hall' ? 'primary' : 'ghost'} onClick={onOpenHall}>
+          <PixelIcon name="guild-hall" size={18} /> Guild Hall
+        </PixelButton>
+        <PixelButton type="button" tone={activeView === 'board' ? 'primary' : 'ghost'} onClick={onOpenBoard}>
+          <PixelIcon name="quest-board" size={18} /> Quest Board
+        </PixelButton>
+        <PixelButton type="button" tone={activeView === 'review' ? 'primary' : 'ghost'} onClick={onOpenReview}>
+          <PixelIcon name="review" size={18} /> Review
+          {pendingCount > 0 && <strong className="pixel-toolbar-count">{pendingCount}</strong>}
+        </PixelButton>
+      </div>
+    </div>
+  );
+}
+
+interface BridgeStatusDetailsProps {
+  status: SystemStatus;
   config: BridgeConfig;
   bridgeReady: boolean;
   onConfigChange: (config: BridgeConfig) => void;
   onApply: () => void;
 }
 
-function BridgeControls({ config, bridgeReady, onConfigChange, onApply }: BridgeControlsProps) {
-  const updateConfig = (patch: Partial<BridgeConfig>) => onConfigChange({ ...config, ...patch });
+function BridgeStatusDetails({ status, config, bridgeReady, onConfigChange, onApply }: BridgeStatusDetailsProps) {
+  const bridgeModeLabel = status.bridgeMode.slice(0, 1).toUpperCase() + status.bridgeMode.slice(1);
+  const bridgeFallbackLabel = status.fallbackReason
+    ? status.activeImplementation === 'mock'
+      ? 'Mock fallback'
+      : 'Fallback active'
+    : getExecutionSource(status);
 
   return (
-    <form
-      className="bridge-controls"
-      onSubmit={(event) => {
-        event.preventDefault();
-        onApply();
-      }}
-    >
-      <select
-        aria-label="Bridge mode"
-        value={config.bridgeMode}
-        onChange={(event) => updateConfig({ bridgeMode: event.target.value as BridgeMode })}
-      >
-        <option value="mock">mock</option>
-        <option value="auto">auto</option>
-        <option value="real">real</option>
-      </select>
-      <input
-        aria-label="Hermes API base URL"
-        value={config.hermesApiBaseUrl}
-        onChange={(event) => updateConfig({ hermesApiBaseUrl: event.target.value })}
-        placeholder="Hermes API base URL"
-      />
-      <button type="submit" disabled={!bridgeReady}>
-        Apply
-      </button>
-    </form>
+    <details className="pixel-bridge-status">
+      <summary>
+        <span>Bridge:</span> {bridgeModeLabel} · {bridgeFallbackLabel}
+      </summary>
+      <div className="pixel-bridge-settings">
+        <label>
+          Bridge mode
+          <PixelSelect
+            value={config.bridgeMode}
+            onChange={(bridgeMode) => onConfigChange({ ...config, bridgeMode: bridgeMode as BridgeMode })}
+            ariaLabel="Bridge mode"
+          >
+            <option value="mock">mock</option>
+            <option value="auto">auto</option>
+            <option value="real">real</option>
+          </PixelSelect>
+        </label>
+        <PixelButton type="button" tone="ghost" onClick={onApply} disabled={!bridgeReady}>
+          Save
+        </PixelButton>
+        <PixelBadge status={status.activeImplementation}>Hermes {status.hermesAvailable}</PixelBadge>
+      </div>
+    </details>
   );
 }
 
@@ -405,86 +555,311 @@ interface GuildHallProps {
   activeQuest?: Task;
   pendingReports: ReportCard[];
   tasks: Task[];
+  systemStatus: SystemStatus;
+  bridgeConfig: BridgeConfig;
   onSelectAgent: (agentId: string) => void;
   onOpenTask: (taskId: string) => void;
+  onOpenBoard: () => void;
   onOpenReview: () => void;
+  onBridgeConfigChange: (config: BridgeConfig) => void;
+  onApplyBridgeConfig: () => void;
+  revisionText: string;
+  onRevisionText: (value: string) => void;
+  onApprove: (reportId: string) => void;
+  onRevise: (reportId: string) => void;
+  commandValue: string;
+  onCommandValue: (value: string) => void;
+  onCreateQuest: () => void;
+  bridgeReady: boolean;
 }
 
-function GuildHall({ agents, activeAgent, activeQuest, pendingReports, tasks, onSelectAgent, onOpenTask, onOpenReview }: GuildHallProps) {
+function GuildHall({
+  agents,
+  activeAgent,
+  activeQuest,
+  pendingReports,
+  tasks,
+  systemStatus,
+  bridgeConfig,
+  onSelectAgent,
+  onOpenTask,
+  onOpenBoard,
+  onOpenReview,
+  onBridgeConfigChange,
+  onApplyBridgeConfig,
+  revisionText,
+  onRevisionText,
+  onApprove,
+  onRevise,
+  commandValue,
+  onCommandValue,
+  onCreateQuest,
+  bridgeReady,
+}: GuildHallProps) {
+  const latestReport = pendingReports[0];
+  const latestReportTask = tasks.find((task) => task.id === latestReport?.taskId);
+  const logTask = activeQuest ?? latestReportTask ?? tasks[0];
+  const recentEvents = logTask?.timeline.slice(-4).reverse() ?? [];
+  const reportProvenance = latestReportTask?.timeline.some((event) => event.source === 'hermes') ? 'Real Hermes output' : 'Mock / Guild-generated report';
+  const activeTaskRelation = activeQuest?.title ?? latestReportTask?.title ?? 'Standing by';
+  const activeQuestCount = tasks.filter((task) => task.state === 'running' || task.state === 'assigned').length;
+  const logEntries = recentEvents.map((event) => ({
+    id: event.id,
+    title: questLogLabel[event.type] ?? event.type.replaceAll('_', ' '),
+    detail: event.message,
+    time: new Date(event.timestamp).toLocaleTimeString(),
+    status: event.type,
+  }));
+  const guildLogEntries =
+    logEntries.length > 0
+      ? logEntries
+      : [
+          {
+            id: 'guild-ready',
+            title: `${activeAgent.name} ready`,
+            detail: `New quests route to ${activeAgent.role} unless reassigned.`,
+            time: 'Now',
+            status: activeAgent.status,
+          },
+          {
+            id: 'guild-bridge',
+            title: 'Bridge checked',
+            detail: `${systemStatus.bridgeMode} mode using ${getExecutionSource(systemStatus)}.`,
+            time: 'Live',
+            status: systemStatus.activeImplementation,
+          },
+          {
+            id: 'guild-review',
+            title: 'Review inbox',
+            detail: `${pendingReports.length} returned quest${pendingReports.length === 1 ? '' : 's'} waiting.`,
+            time: 'Live',
+            status: pendingReports.length > 0 ? 'needs_review' : 'idle',
+          },
+        ];
+  const bridgeModeLabel = systemStatus.bridgeMode.slice(0, 1).toUpperCase() + systemStatus.bridgeMode.slice(1);
+  const bridgeFallbackLabel = systemStatus.fallbackReason
+    ? systemStatus.activeImplementation === 'mock'
+      ? 'Mock fallback'
+      : 'Fallback active'
+    : getExecutionSource(systemStatus);
+  const bridgeHealthLabel = `Hermes ${systemStatus.hermesAvailable}`;
+  const suggestedPrompts = ['Prepare a demo brief', 'Summarize recent notes', 'Review returned quests'];
+  const updateBridgeMode = (bridgeMode: BridgeMode) => onBridgeConfigChange({ ...bridgeConfig, bridgeMode });
+
   return (
-    <section className="view-grid hall-grid">
-      <div className="panel hero-panel">
-        <p className="eyebrow">Active Profile</p>
-        <div className="hero-row">
-          <div>
-            <h2>{activeAgent.name}</h2>
-            <p>{activeAgent.role} configured signals: {activeAgent.traits.join(', ')}</p>
+    <PixelAppWindow
+      className="pixel-guild-window"
+      title="Hermes Guild"
+      subtitle="Guild Hall · Companion Workbench"
+      status={
+        <details className="pixel-bridge-status">
+          <summary>
+            <span>Bridge:</span> {bridgeModeLabel} · {bridgeFallbackLabel}
+          </summary>
+          <div className="pixel-bridge-settings">
+            <label>
+              Bridge mode
+              <PixelSelect value={bridgeConfig.bridgeMode} onChange={(bridgeMode) => updateBridgeMode(bridgeMode as BridgeMode)} ariaLabel="Bridge mode">
+                <option value="mock">mock</option>
+                <option value="auto">auto</option>
+                <option value="real">real</option>
+              </PixelSelect>
+            </label>
+            <PixelButton type="button" tone="ghost" onClick={onApplyBridgeConfig} disabled={!bridgeReady}>
+              Save
+            </PixelButton>
+            <PixelBadge status={systemStatus.activeImplementation}>{bridgeHealthLabel}</PixelBadge>
           </div>
-          <span className={`state-pill ${activeAgent.status}`}>{statusLabel[activeAgent.status]}</span>
+        </details>
+      }
+      toolbar={
+        <div className="pixel-main-toolbar">
+          <span>Guild Hall</span>
+          <div>
+            <PixelButton type="button" tone="ghost" onClick={onOpenBoard}>
+              <PixelIcon name="quest-board" size={18} /> Quest Board
+            </PixelButton>
+            <PixelButton type="button" tone="ghost" onClick={onOpenReview}>
+              <PixelIcon name="review" size={18} /> Review
+              {pendingReports.length > 0 && <strong className="pixel-toolbar-count">{pendingReports.length}</strong>}
+            </PixelButton>
+          </div>
         </div>
-        <div className="quest-focus">
-          <Flag size={18} />
-          {activeQuest ? (
-            <button onClick={() => onOpenTask(activeQuest.id)}>
-              {activeQuest.title}
-              <ChevronRight size={16} />
-            </button>
-          ) : (
-            <span>No active quest for this profile.</span>
-          )}
+      }
+      commandBar={
+        <PixelCommandBar
+          value={commandValue}
+          onChange={onCommandValue}
+          onSubmit={onCreateQuest}
+          disabled={!bridgeReady}
+          hint={`${activeAgent.name} / ${activeAgent.role}`}
+          placeholder="Ask Hermes to do something..."
+          secondaryAction={
+            <PixelButton type="button" tone="secondary" onClick={onOpenReview}>
+              <PixelIcon name="review" size={18} /> Review
+            </PixelButton>
+          }
+        />
+      }
+    >
+      <header className="pixel-guild-summary">
+        <div>
+          <h1>Guild Hall</h1>
+          <p>{activeAgent.name} is ready for direct quest work. Returned results stay one review action away.</p>
         </div>
-      </div>
+        <div className="pixel-guild-kpis" aria-label="Guild Hall summary">
+          <span>
+            <strong>{pendingReports.length}</strong>
+            pending review{pendingReports.length === 1 ? '' : 's'}
+          </span>
+          <span>
+            <strong>{activeQuestCount}</strong>
+            active quest{activeQuestCount === 1 ? '' : 's'}
+          </span>
+        </div>
+      </header>
 
-      <div className="panel review-callout">
-        <p className="eyebrow">Pending Review</p>
-        <strong>{pendingReports.length}</strong>
-        <button onClick={onOpenReview}>
-          <ScrollText size={16} /> Open Reports
-        </button>
-      </div>
+      <section className="pixel-guild-layout">
+        <PixelPanel className="pixel-companion-card" title="Active Companion" icon={<PixelIcon name="companion" size={20} />}>
+          <div className="pixel-companion-top">
+            <PixelAvatar
+              className="pixel-companion-portrait"
+              name={activeAgent.name}
+              role={activeAgent.role}
+              status={activeAgent.status}
+            />
+            <div>
+              <h2>{activeAgent.name}</h2>
+              <p>{activeAgent.role} class</p>
+              <PixelBadge status={activeAgent.status}>{statusLabel[activeAgent.status]}</PixelBadge>
+            </div>
+          </div>
+          <p className="pixel-companion-line">
+            {statusLabel[activeAgent.status]} beside the command desk. New quests route to this companion unless reassigned.
+          </p>
+          <div className="pixel-inset-note">
+            <strong>Focus</strong>
+            <p>{activeAgent.traits.slice(0, 2).join(' & ')}</p>
+          </div>
+          <div className="pixel-inset-note">
+            <strong>Current task</strong>
+            <p>{activeTaskRelation}</p>
+          </div>
+          <div className="pixel-companion-footer">
+            <PixelBadge status="mock">Guild Role · Hermes default runner</PixelBadge>
+            <label className="pixel-field-label pixel-profile-switcher">
+              Switch
+              <PixelSelect value={activeAgent.id} onChange={onSelectAgent} ariaLabel="Active companion">
+                {agents.map((agent) => (
+                  <option key={agent.id} value={agent.id}>
+                    {agent.name} - {agent.role}
+                  </option>
+                ))}
+              </PixelSelect>
+            </label>
+          </div>
+        </PixelPanel>
 
-      <div className="agent-grid">
-        {agents.map((agent) => (
-          <AgentCard key={agent.id} agent={agent} active={agent.id === activeAgent.id} onSelect={() => onSelectAgent(agent.id)} />
-        ))}
-      </div>
+        <PixelQuestCard
+          title={activeQuest?.title ?? 'No active quest'}
+          brief={activeQuest?.brief ?? `Ask ${activeAgent.name} to start from the command box below.`}
+          currentStep={
+            activeQuest?.timeline.at(-1)?.message ??
+            `${activeAgent.name} is ready. Choose a suggested quest or type a new command below.`
+          }
+          progress={activeQuest?.progress ?? 0}
+          state={activeQuest?.state ?? 'idle'}
+          empty={!activeQuest}
+          suggestions={suggestedPrompts}
+          onSuggestionSelect={onCommandValue}
+          action={
+            activeQuest ? (
+              <PixelButton onClick={() => onOpenTask(activeQuest.id)}>
+                <PixelIcon name="quest-log" size={18} /> Open Quest Log
+              </PixelButton>
+            ) : (
+              <PixelButton tone="secondary" onClick={onOpenReview}>
+                <PixelIcon name="review" size={18} /> Review Returned Quests
+              </PixelButton>
+            )
+          }
+        />
 
-      <div className="panel recent-panel">
-        <p className="eyebrow">Recent Quests</p>
-        {tasks.length === 0 ? (
-          <p className="muted">Create a quest from the pet to start the loop.</p>
-        ) : (
-          tasks.slice(0, 5).map((task) => (
-            <button key={task.id} className="task-row" onClick={() => onOpenTask(task.id)}>
-              <span>{task.title}</span>
-              <small>{statusLabel[task.state]}</small>
-            </button>
-          ))
-        )}
-      </div>
-    </section>
+        <aside className="pixel-guild-side">
+          <PixelReviewCard
+            title={latestReport ? latestReport.title.replace(/^Quest Completed:\s*/i, '') : 'No report waiting'}
+            summary={latestReport ? latestReport.summary : 'Returned quests appear here with approve and revise actions.'}
+            artifact={latestReport?.artifacts[0]?.title ?? undefined}
+            provenance={latestReport ? reportProvenance : 'No returned output'}
+            pendingCount={pendingReports.length}
+            actions={
+              latestReport ? (
+                <div className="pixel-review-actions">
+                  <PixelButton tone="success" onClick={() => onApprove(latestReport.id)}>
+                    <PixelIcon name="approved" size={18} /> Approve
+                  </PixelButton>
+                  <PixelButton tone="secondary" onClick={() => onRevise(latestReport.id)}>
+                    <PixelIcon name="revise" size={18} /> Revise
+                  </PixelButton>
+                  <PixelInput value={revisionText} onChange={onRevisionText} multiline rows={2} ariaLabel="Revision instructions" />
+                </div>
+              ) : (
+                <PixelButton tone="secondary" onClick={onOpenReview}>
+                  Open Review Chamber
+                </PixelButton>
+              )
+            }
+          />
+
+          <PixelPanel title="Quest Log" icon={<PixelIcon name="quest-log" size={18} />} compact>
+            <PixelLogList entries={guildLogEntries} emptyText="Recent field notes appear after a quest starts." />
+            {logTask && (
+              <PixelButton tone="ghost" onClick={() => onOpenTask(logTask.id)}>
+                <PixelIcon name="chevron" size={16} /> View Full Log
+              </PixelButton>
+            )}
+          </PixelPanel>
+        </aside>
+
+        <PixelTruthStrip
+          mode={systemStatus.bridgeMode}
+          implementation={systemStatus.activeImplementation}
+          execution={getExecutionSource(systemStatus)}
+          hermes={systemStatus.hermesAvailable}
+          fallback={systemStatus.fallbackReason}
+          profileSource="Guild-defined roles"
+        />
+      </section>
+    </PixelAppWindow>
   );
 }
 
-function AgentCard({ agent, active, onSelect }: { agent: Agent; active: boolean; onSelect: () => void }) {
+function AgentCard({ agent, active, currentTask, onSelect }: { agent: Agent; active: boolean; currentTask?: Task; onSelect: () => void }) {
   const Icon = roleIcon[agent.role];
   return (
     <article className={`agent-card ${active ? 'active' : ''}`}>
       <div className="agent-card-header">
-        <Icon size={22} />
+        <div className="party-emblem">
+          <Icon size={22} />
+        </div>
         <button onClick={onSelect}>{active ? 'Active Pet' : 'Assign Pet'}</button>
       </div>
       <h3>{agent.name}</h3>
-      <p>{agent.role}</p>
+      <p>{agent.role} class</p>
       <div className={`state-pill ${agent.status}`}>{statusLabel[agent.status]}</div>
+      <div className="current-quest">
+        <strong>Current quest</strong>
+        <span>{currentTask?.title ?? 'Standing by'}</span>
+      </div>
       <dl>
-        <dt>Strong</dt>
+        <dt>Traits</dt>
         <dd>{agent.traits.join(', ')}</dd>
         <dt>Best for</dt>
         <dd>{agent.bestFor}</dd>
         <dt>Equipment</dt>
         <dd>{agent.equipment.join(', ')}</dd>
       </dl>
+      <div className="truth-label">Guild Role · Real execution uses Hermes default runner</div>
     </article>
   );
 }
@@ -493,6 +868,7 @@ interface QuestBoardProps {
   agents: Agent[];
   tasks: Task[];
   selectedTask?: Task;
+  systemStatus: SystemStatus;
   boardInput: string;
   boardGoals: string;
   boardNonGoals: string;
@@ -514,6 +890,7 @@ function QuestBoard({
   agents,
   tasks,
   selectedTask,
+  systemStatus,
   boardInput,
   boardGoals,
   boardNonGoals,
@@ -531,93 +908,128 @@ function QuestBoard({
   bridgeReady,
 }: QuestBoardProps) {
   return (
-    <section className="board-layout">
-      <div className="panel intake-panel">
-        <p className="eyebrow">Direct Assignment</p>
-        <textarea
-          value={boardInput}
-          onChange={(event) => onBoardInput(event.target.value)}
-          placeholder="What should this agent do?"
-          rows={3}
-        />
-        <details className="advanced-intake">
+    <section className="pixel-board-layout">
+      <PixelPanel className="quest-post-panel" title="Quest Posting" icon={<PixelIcon name="feather-pen" size={20} />}>
+        <div className="quest-post-scroll">
+          <div className="quest-contract-note">
+            <PixelIcon name="seal" size={28} />
+            <span>
+              <strong>Quest Contract</strong>
+              <em>Brief the work, assign a Guild role, then post it to the active bridge.</em>
+            </span>
+          </div>
+          <PixelInput
+            value={boardInput}
+            onChange={onBoardInput}
+            placeholder="Post a quest for the guild..."
+            multiline
+            rows={3}
+            ariaLabel="Quest brief"
+          />
+        <details className="advanced-intake pixel-advanced-brief">
           <summary>Advanced brief</summary>
           <label>
             Goals
-            <textarea value={boardGoals} onChange={(event) => onBoardGoals(event.target.value)} rows={2} />
+            <PixelInput value={boardGoals} onChange={onBoardGoals} multiline rows={2} ariaLabel="Quest goals" />
           </label>
           <label>
             Non-goals
-            <textarea value={boardNonGoals} onChange={(event) => onBoardNonGoals(event.target.value)} rows={2} />
+            <PixelInput value={boardNonGoals} onChange={onBoardNonGoals} multiline rows={2} ariaLabel="Quest non-goals" />
           </label>
           <label>
             Context
-            <textarea value={boardContext} onChange={(event) => onBoardContext(event.target.value)} rows={2} />
+            <PixelInput value={boardContext} onChange={onBoardContext} multiline rows={2} ariaLabel="Quest context" />
           </label>
           <label>
             Definition of done
-            <textarea value={boardDefinitionOfDone} onChange={(event) => onBoardDefinitionOfDone(event.target.value)} rows={2} />
+            <PixelInput value={boardDefinitionOfDone} onChange={onBoardDefinitionOfDone} multiline rows={2} ariaLabel="Definition of done" />
           </label>
         </details>
-        <div className="inline-controls">
-          <select value={boardAssignee} onChange={(event) => onBoardAssignee(event.target.value)} aria-label="Quest assignee">
+        </div>
+        <div className="quest-post-actions">
+          <PixelSelect value={boardAssignee} onChange={onBoardAssignee} ariaLabel="Quest assignee">
             {agents.map((agent) => (
               <option key={agent.id} value={agent.id}>
                 {agent.name} - {agent.role}
               </option>
             ))}
-          </select>
-          <button onClick={onCreateQuest} disabled={!bridgeReady}>
-            <Flag size={16} /> Create Quest
-          </button>
+          </PixelSelect>
+          <PixelButton onClick={onCreateQuest} disabled={!bridgeReady}>
+            <PixelIcon name="plus" size={18} /> Create Quest
+          </PixelButton>
         </div>
-      </div>
+      </PixelPanel>
 
-      <div className="panel task-list">
-        <p className="eyebrow">Quest List</p>
+      <PixelPanel className="quest-log-panel" title="Quest Board" icon={<PixelIcon name="quest-board" size={20} />}>
         {tasks.length === 0 ? (
-          <p className="muted">No quests yet.</p>
+          <div className="quest-board-empty">
+            <PixelIcon name="quest" size={42} />
+            <h3>No quests posted</h3>
+            <p>Draft a quest on the left and assign it to a Guild role.</p>
+            <span>Quest cards will show state, progress, and review readiness here.</span>
+          </div>
         ) : (
           tasks.map((task) => (
-            <button key={task.id} className={selectedTask?.id === task.id ? 'selected' : ''} onClick={() => onSelectTask(task.id)}>
-              <span>{task.title}</span>
-              <small>{statusLabel[task.state]}</small>
+            <button key={task.id} className={`quest-menu-item ${selectedTask?.id === task.id ? 'selected' : ''}`} onClick={() => onSelectTask(task.id)}>
+              <span>
+                <strong>{task.title}</strong>
+                <em>{task.brief}</em>
+              </span>
+              <PixelBadge status={task.state}>{statusLabel[task.state]} · {task.progress}%</PixelBadge>
             </button>
           ))
         )}
-      </div>
+      </PixelPanel>
 
-      <TaskDetail task={selectedTask} agent={agents.find((agent) => agent.id === selectedTask?.assigneeId)} />
+      <TaskDetail task={selectedTask} agent={agents.find((agent) => agent.id === selectedTask?.assigneeId)} systemStatus={systemStatus} />
+
+      <PixelTruthStrip
+        mode={systemStatus.bridgeMode}
+        implementation={systemStatus.activeImplementation}
+        execution={getExecutionSource(systemStatus)}
+        hermes={systemStatus.hermesAvailable}
+        fallback={systemStatus.fallbackReason}
+        profileSource="Guild-defined roles"
+      />
     </section>
   );
 }
 
-function TaskDetail({ task, agent }: { task?: Task; agent?: Agent }) {
+function TaskDetail({ task, agent, systemStatus }: { task?: Task; agent?: Agent; systemStatus: SystemStatus }) {
   if (!task) {
     return (
-      <div className="panel task-detail empty">
-        <FileText size={28} />
-        <p>Select or create a quest to inspect its timeline.</p>
-      </div>
+      <PixelPanel className="quest-detail-panel empty">
+        <div className="quest-detail-empty">
+          <PixelIcon name="document" size={42} />
+          <h3>No quest selected</h3>
+          <p>Select a quest from the board to inspect its contract, timeline, artifacts, and review state.</p>
+          <div>
+            <span>Timeline</span>
+            <span>Artifacts</span>
+            <span>Review state</span>
+          </div>
+        </div>
+      </PixelPanel>
     );
   }
 
   return (
-    <article className="panel task-detail">
+    <PixelPanel className="quest-detail-panel" title="Quest Detail" icon={<PixelIcon name="scroll" size={20} />}>
       <div className="detail-header">
         <div>
-          <p className="eyebrow">Task Detail</p>
           <h2>{task.title}</h2>
           <p>{task.brief}</p>
         </div>
-        <span className={`state-pill ${task.state}`}>{statusLabel[task.state]}</span>
+        <PixelBadge status={task.state}>{statusLabel[task.state]}</PixelBadge>
       </div>
-      <div className="progress-track" aria-label={`Progress ${task.progress}%`}>
+      <div className="pixel-progress" aria-label={`Progress ${task.progress}%`}>
         <span style={{ width: `${task.progress}%` }} />
       </div>
       <div className="detail-meta">
         <span>Assignee: {agent ? `${agent.name} / ${agent.role}` : task.assigneeId}</span>
         <span>Review: {task.reviewStatus.replaceAll('_', ' ')}</span>
+        <span>Execution: {getExecutionSource(systemStatus)}</span>
+        <span>Profile data: Guild-defined role</span>
       </div>
       {(task.goals || task.nonGoals || task.context || task.definitionOfDone) && (
         <div className="brief-notes">
@@ -661,7 +1073,7 @@ function TaskDetail({ task, agent }: { task?: Task; agent?: Agent }) {
           <li key={event.id}>
             <span className={`timeline-type ${event.type}`} />
             <div>
-              <strong>{event.type.replaceAll('_', ' ')}</strong>
+              <strong>{questLogLabel[event.type] ?? event.type.replaceAll('_', ' ')}</strong>
               <p>{event.message}</p>
               <time>
                 {new Date(event.timestamp).toLocaleTimeString()} / {event.source}
@@ -670,7 +1082,7 @@ function TaskDetail({ task, agent }: { task?: Task; agent?: Agent }) {
           </li>
         ))}
       </ol>
-    </article>
+    </PixelPanel>
   );
 }
 
@@ -687,10 +1099,26 @@ interface ReviewChamberProps {
 function ReviewChamber({ reports, tasks, agents, revisionText, onRevisionText, onApprove, onRevise }: ReviewChamberProps) {
   if (reports.length === 0) {
     return (
-      <section className="panel empty-review">
-        <ScrollText size={32} />
-        <h2>No quest reports yet</h2>
-        <p>Completed mock work returns here for approve or revise.</p>
+      <section className="review-empty-surface">
+        <PixelPanel className="review-inbox-panel" title="Review Inbox" icon={<PixelIcon name="review" size={20} />}>
+          <div className="review-empty-list">
+            <PixelIcon name="returned" size={40} />
+            <h2>No returned quests</h2>
+            <p>Completed Hermes outputs will queue here for approve or revise.</p>
+          </div>
+        </PixelPanel>
+        <PixelPanel className="review-detail-panel empty" title="Result Slip" icon={<PixelIcon name="report" size={20} />} variant="review">
+          <div className="review-empty-detail">
+            <PixelIcon name="scroll" size={44} />
+            <h3>Awaiting report card</h3>
+            <p>When a quest returns, this surface shows summary, artifacts, facts, assumptions, gaps, provenance, and review actions.</p>
+            <div>
+              <span>Approve</span>
+              <span>Revise</span>
+              <span>Provenance</span>
+            </div>
+          </div>
+        </PixelPanel>
       </section>
     );
   }
@@ -701,16 +1129,27 @@ function ReviewChamber({ reports, tasks, agents, revisionText, onRevisionText, o
         const task = tasks.find((item) => item.id === report.taskId);
         const agent = agents.find((item) => item.id === report.agentId);
         const locked = !isActionableReportTask(task);
+        const reportTitle = report.title.replace(/^Quest Completed:\s*/i, '');
 
         return (
-          <article key={report.id} className={`report-card ${locked ? 'locked' : ''}`}>
+          <PixelPanel
+            key={report.id}
+            className={`report-card ${locked ? 'locked' : ''}`}
+            title="Quest Report Card"
+            icon={<PixelIcon name="report" size={20} />}
+            variant="review"
+          >
             <div className="report-header">
               <div>
                 <p className="eyebrow">{agent ? `${agent.name} / ${agent.role}` : report.agentId}</p>
-                <h2>{report.title}</h2>
+                <h2>Quest Completed: {reportTitle}</h2>
                 <p>{report.summary}</p>
               </div>
-              <span className={`state-pill ${task?.reviewStatus ?? 'none'}`}>{task?.reviewStatus.replaceAll('_', ' ') ?? 'missing task'}</span>
+              <PixelBadge status={task?.reviewStatus ?? 'unchecked'}>{task?.reviewStatus.replaceAll('_', ' ') ?? 'missing task'}</PixelBadge>
+            </div>
+            <div className="provenance-box">
+              <strong>Output provenance</strong>
+              <span>{task?.timeline.some((event) => event.source === 'hermes') ? 'Real Hermes output' : 'Mock / Guild-generated report'}</span>
             </div>
             <div className="reward-grid">
               {report.artifacts.map((artifact) => (
@@ -730,16 +1169,16 @@ function ReviewChamber({ reports, tasks, agents, revisionText, onRevisionText, o
             </div>
             {!locked && (
               <div className="review-actions">
-                <textarea value={revisionText} onChange={(event) => onRevisionText(event.target.value)} rows={2} />
-                <button onClick={() => onApprove(report.id)}>
-                  <Check size={16} /> Approve
-                </button>
-                <button className="secondary" onClick={() => onRevise(report.id)}>
-                  <RefreshCcw size={16} /> Revise
-                </button>
+                <PixelInput value={revisionText} onChange={onRevisionText} multiline rows={2} ariaLabel="Revision instructions" />
+                <PixelButton tone="success" onClick={() => onApprove(report.id)}>
+                  <PixelIcon name="approved" size={18} /> Approve
+                </PixelButton>
+                <PixelButton tone="secondary" onClick={() => onRevise(report.id)}>
+                  <PixelIcon name="revise" size={18} /> Revise
+                </PixelButton>
               </div>
             )}
-          </article>
+          </PixelPanel>
         );
       })}
     </section>
@@ -755,6 +1194,170 @@ function ReportSection({ title, items }: { title: string; items: string[] }) {
           <li key={item}>{item}</li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function PixelShowcase() {
+  const showcaseIcons = [
+    'guild-hall',
+    'quest-board',
+    'review',
+    'quest',
+    'quest-log',
+    'report',
+    'companion',
+    'settings',
+    'diagnostics',
+    'bridge-real',
+    'bridge-mock',
+    'bridge-auto',
+    'hermes-available',
+    'hermes-unavailable',
+    'approved',
+    'revise',
+    'send',
+    'scroll',
+    'feather-pen',
+    'spark',
+  ] as const;
+  const sampleLogs = [
+    {
+      id: 'log-1',
+      title: 'Agent started work',
+      detail: 'Compiled source notes and scoped the returned brief.',
+      time: '09:12',
+    },
+    {
+      id: 'log-2',
+      title: 'Field note',
+      detail: 'Extracted positioning themes and pricing deltas.',
+      time: '09:18',
+    },
+    {
+      id: 'log-3',
+      title: 'Report drafted',
+      detail: 'Prepared artifact preview and review notes.',
+      time: '09:24',
+    },
+  ];
+
+  return (
+    <div className="pixel-showcase">
+      <PixelAppWindow
+        title="Hermes Guild"
+        subtitle="Pixel UI Kit Showcase"
+        status={<PixelBadge status="auto">auto</PixelBadge>}
+        commandBar={
+          <PixelCommandBar
+            value=""
+            onChange={() => undefined}
+            onSubmit={() => undefined}
+            hint="Hermes / Researcher"
+            placeholder="What shall we do today?"
+          />
+        }
+      >
+        <div className="pixel-showcase-grid">
+          <PixelPanel title="Panel Variants">
+            <div className="pixel-showcase-row">
+              <PixelPanel compact title="Parchment">
+                <p className="pixel-muted">Parchment panel 9-slice</p>
+              </PixelPanel>
+              <PixelPanel compact title="Dark" variant="dark">
+                <p className="pixel-muted">Dark panel 9-slice</p>
+              </PixelPanel>
+              <PixelPanel compact title="Inset" variant="inset">
+                <p className="pixel-muted">Inset frame</p>
+              </PixelPanel>
+            </div>
+            <div className="pixel-showcase-row">
+              <PixelBadge status="idle">idle</PixelBadge>
+              <PixelBadge status="running">running</PixelBadge>
+              <PixelBadge status="needs_review">needs review</PixelBadge>
+              <PixelBadge status="error">error</PixelBadge>
+              <PixelBadge status="real">real</PixelBadge>
+              <PixelBadge status="mock">mock</PixelBadge>
+            </div>
+            <div className="pixel-showcase-row">
+              <PixelChip>Builder</PixelChip>
+              <PixelChip>Researcher</PixelChip>
+              <PixelChip>Reviewer</PixelChip>
+            </div>
+            <div className="pixel-showcase-row">
+              <PixelButton>Primary</PixelButton>
+              <PixelButton tone="secondary">Secondary</PixelButton>
+              <PixelButton tone="success">Approve</PixelButton>
+              <PixelButton tone="danger">Danger</PixelButton>
+              <PixelButton tone="ghost">Ghost</PixelButton>
+            </div>
+            <PixelInput value="" onChange={() => undefined} placeholder="Ask Hermes to do something..." />
+            <PixelInput value="" onChange={() => undefined} placeholder="Detailed quest notes..." multiline rows={3} />
+          </PixelPanel>
+
+          <PixelPanel title="Avatar States">
+            <div className="pixel-showcase-row">
+              <PixelAvatar name="Lyra" role="Researcher" status="idle" />
+              <PixelAvatar name="Brass" role="Builder" status="running" />
+              <PixelAvatar name="Sable" role="Reviewer" status="needs_review" />
+              <PixelAvatar name="Moss" role="Gatherer" status="error" />
+            </div>
+            <div className="pixel-showcase-row">
+              <PixelMascot state="idle" label="Owl idle" />
+              <PixelMascot state="running" label="Owl running" />
+              <PixelMascot state="needs_review" label="Owl needs review" />
+              <PixelMascot state="error" label="Owl error" />
+            </div>
+          </PixelPanel>
+
+          <PixelPanel title="Icon Catalog">
+            <div className="pixel-icon-grid">
+              {showcaseIcons.map((iconName) => (
+                <span key={iconName}>
+                  <PixelIcon name={iconName} size={42} label={iconName} />
+                  <small>{iconName}</small>
+                </span>
+              ))}
+            </div>
+          </PixelPanel>
+
+          <PixelQuestCard
+            title="Market Research Brief"
+            brief="Compile insights on competitor pricing and positioning."
+            currentStep="Drafted insights and recommendations outline."
+            progress={68}
+            state="running"
+            action={<PixelButton>Continue Quest</PixelButton>}
+          />
+
+          <PixelReviewCard
+            title="market-research-brief.md"
+            summary="Well-structured brief with clear insights."
+            artifact="market-research-brief.md"
+            provenance="Real Hermes output"
+            pendingCount={1}
+            actions={
+              <div className="pixel-showcase-row">
+                <PixelButton tone="success">Approve</PixelButton>
+                <PixelButton tone="secondary">Revise</PixelButton>
+              </div>
+            }
+          />
+
+          <PixelPanel title="Quest Log">
+            <PixelLogList entries={sampleLogs} emptyText="No entries yet." />
+          </PixelPanel>
+
+          <PixelTruthStrip
+            mode="auto"
+            implementation="mock"
+            execution="Mock fallback"
+            hermes="unavailable"
+            fallback="Hermes API health request failed"
+            profileSource="Guild-defined roles"
+          />
+        </div>
+      </PixelAppWindow>
     </div>
   );
 }

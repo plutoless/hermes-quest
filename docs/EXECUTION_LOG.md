@@ -8,10 +8,10 @@ Use:
 - this file for current status, decisions, checkpoints, blockers, and remaining gaps
 
 ## Current Objective
-- Replace the subprocess RealHermesBridge with an API-first Hermes bridge while preserving the existing mock bridge and v0 loop.
+- Build a reusable asset-based Pixel JRPG UI Kit, then apply it only to the main Guild Hall / Main Window screen for a high-fidelity low-density desktop app pass while preserving the v0 loop, RealHermes bridge, and mock/real/auto modes.
 
 ## Current Milestone
-- Phase 6 — API-first Real Hermes Bridge
+- Pixel UI Kit and Guild Hall fidelity pass
 
 ## Current Status
 - React v0 loop is implemented and runnable through Vite.
@@ -19,7 +19,42 @@ Use:
 - MockHermesBridge remains available.
 - RealHermesBridge is implemented as a Hermes API adapter behind the same UI-facing bridge interface.
 - Bridge factory supports `mock`, `real`, and `auto`; auto falls back to mock when real Hermes is unavailable.
-- Codex Goal status: active for API-first real Hermes integration.
+- Codex Goal status: active for asset-based Pixel UI Kit and one-screen Guild Hall fidelity verification.
+
+## Pixel UI Kit Plan — 2026-05-04 Main Window Fidelity
+
+- Treat `docs/PIXEL_UI_KIT.md`, `docs/WEB_FIDELITY_PASS.md`, and `docs/LOW_DENSITY_PIXEL_JRPG_UI.md` as the active UI implementation constraints.
+- Build a reusable pixel UI component layer before further page work.
+- Use asset-based styling where feasible: SVG pixel panel frames, dark frames, pixel icon ornaments, and subtle texture assets with `image-rendering: pixelated`.
+- Apply the kit only to the main Guild Hall screen. Do not redesign Quest Board, Review Chamber, Pet Mode, or create new visual variants in this pass.
+- Preserve existing bridge calls and review behavior: Pet and Quest Board submissions still use `submitTask` when available; approve/revise still call bridge review methods; bridge mode controls remain available.
+
+## Low-Density Plan — 2026-05-04 Pixel JRPG Workbench
+
+- Treat `docs/LOW_DENSITY_PIXEL_JRPG_UI.md` as the current UI direction, with the content mirrored from the provided low-density goal brief.
+- Make `04 · Skyship Command Deck` the default variant and primary visual direction.
+- Reduce Guild Hall from a concept-board/party-roster layout to three visible focus areas: one active companion, one active quest, and one compact quest report / quest log area.
+- Keep integration truth visible but compact: bridge mode, active implementation, Hermes availability, fallback, profile truth, and execution source remain surfaced without creating a dense telemetry dashboard.
+- Keep the v0 bridge and review paths unchanged: Pet and Quest Board still submit through `submitTask` when available, real/mock/auto modes remain selectable, and approve/revise still call the bridge review methods.
+
+## Variant Plan — 2026-05-04 JRPG Variants
+
+- Preserve the existing React state, bridge calls, bridge selector, and v0 loop. Variants are presentational review modes only.
+- Implement the simplest review path: an in-app variant selector that applies a variant class/config across Pet Mode, Guild Hall, Character Cards, Quest Board, Task Detail, Quest Report Card, Review Chamber, and Integration Truth.
+- Generate one image reference board per variant. Each board covers all required current pages as a coordinated multi-screen UI reference rather than separate product scope.
+- Make each variant differ by layout/composition and component treatment, not only colors: panel geometry, framing, pet presentation, timeline treatment, report-card layout, and heading/label language.
+- Keep integration truth visible in every variant: bridge mode, active implementation, Hermes availability, fallback reason, profile data source, and execution source remain surfaced.
+- Do not add new product scope: no multiple pets, party quests, XP/levels, Tavern, Skill Deck, Infirmary, voice, full profile routing, artifact browser, or bridge rewrite.
+
+## Visual Plan — 2026-05-04 JRPG Pixel UI Redesign
+
+- Keep the existing React views and bridge calls intact: Pet Mode, Guild Hall, Quest Board, Task Detail, Review, and bridge controls remain the same v0 loop.
+- Convert the visual system to a restrained pixel-art JRPG workbench: dark navy field, parchment panels, bronze/gold highlights, pixel-border shadows, compact menu labels, and readable body text.
+- Make Guild Hall read as a JRPG guild command screen: active companion panel, active quest focus, review count, system rune, party cards, and recent quest activity.
+- Make agent cards read as party member panels with avatar/emblem, role/class, state, traits, current quest/equipment, and an explicit truth label that profile roles are Guild-defined while real execution uses the Hermes default runner.
+- Make Quest Board, Task Detail, timeline, and Review use JRPG language only where it clarifies state: quest cards, quest log/battle log event labels, mission-result report cards, and visible real/mock provenance.
+- Keep integration truth visible in a system-status box showing bridge mode, active implementation, Hermes availability, fallback reason, profile data source, and execution source.
+- Do not add new product scope: no multiple pets, party quests, XP/levels, Tavern, Skill Deck, Infirmary, voice, full profile routing, artifact browser, or bridge rewrite.
 
 ## Decisions
 
@@ -88,6 +123,80 @@ Status: accepted
 Reason: Tauri is native shell plus WebView UI. Browser-origin rules still apply to `fetch()` from React, so native mode should call the Hermes API through a Tauri command and let Rust perform local HTTP requests without WebView CORS constraints.
 
 ## Checkpoints
+
+### 2026-05-04 11:42 CST — Pixel UI Kit and Guild Hall fidelity pass
+
+#### Goal
+Create a reusable asset-based Pixel JRPG UI Kit and use it to refactor only the main Guild Hall screen into a high-fidelity low-density desktop app surface.
+
+#### Changed
+- Added pixel UI assets under `src/assets/pixel-ui/`: SVG panel frames, dark frames, pixel ornament icons, and subtle parchment/navy texture assets.
+- Added the reusable React component layer in `src/ui/pixel/index.tsx`: `PixelAppWindow`, `PixelPanel`, `PixelButton`, `PixelInput`, `PixelBadge`, `PixelAvatar`, `PixelSectionHeader`, `PixelQuestCard`, `PixelLogList`, `PixelReviewCard`, `PixelTruthStrip`, and `PixelCommandBar`.
+- Added `src/styles/pixel-theme.css` with asset-based `border-image` frames, pixelated rendering rules for pixel assets, readable hybrid typography, focus states, status badge styles, and low-density desktop layout primitives.
+- Refactored only the main `GuildHall` screen in `src/App.tsx` to use the Pixel UI Kit.
+- Added `/pixel-ui-showcase` as a developer review surface for the kit components.
+- Updated `README.md` with Pixel UI review paths and scope notes.
+
+#### Decisions
+- Keep the existing Pet Mode sidebar, Quest Board, Review Chamber, bridge controls, and variant system behavior unchanged in this pass.
+- Use SVG pixel assets as the first asset-based implementation because they are repo-native, sharp, and compatible with CSS `border-image`; generated PNG sprites can be added later without changing the component API.
+
+#### Works
+- Main Guild Hall now contains a pixel desktop app window shell, active companion card, active quest card, compact quest log, compact review/result card, integration truth strip, and bottom command input.
+- The command bar creates quests through the existing pet submission path and assigns to the active profile.
+- Review actions on the Guild Hall report card still call the existing bridge approve/revise methods.
+- Integration truth remains visible and honest: bridge mode, active implementation, execution source, Hermes availability, fallback, and profile source.
+
+#### Remaining Gaps
+- Pixel assets are SVG primitives, not final hand-painted/generated PNG sprites.
+- Quest Board and Review Chamber intentionally still use the existing UI until the main window fidelity is accepted.
+
+#### Tested
+- `bun run lint`: passed after the component layer and Guild Hall refactor.
+- Headless Chrome visual check for `http://127.0.0.1:1425/?variant=skyship-command-deck` captured `/tmp/hermes-pixel-guild-headless-3.png`; verified the main screen includes the pixel app window, active companion, active quest, compact review/log, integration truth, and bottom command bar.
+- Headless Chrome visual check for `http://127.0.0.1:1425/pixel-ui-showcase` captured `/tmp/hermes-pixel-showcase.png`; verified the showcase displays panels, buttons, inputs, badges, avatars, quest card, log list, review card, truth strip, and command bar.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+#### Next
+- Continue main-window visual iteration only after design review.
+
+### 2026-05-04 05:10 CST — Low-density Skyship workbench pass
+
+#### Goal
+Redesign the primary UI into a low-density desktop-native pixel JRPG companion workbench close to the fourth generated direction.
+
+#### Changed
+- Added `docs/LOW_DENSITY_PIXEL_JRPG_UI.md` as the canonical low-density UI direction.
+- Changed the default visual variant to `skyship-command-deck`.
+- Reworked Guild Hall into three main focus areas: active companion, active quest, and compact quest report / quest log highlights.
+- Moved approve/revise actions into the compact Guild Hall report panel while preserving the existing Review Chamber approve/revise bridge calls.
+- Tightened the Skyship top bar, bridge truth block, companion sidebar, panel spacing, and timeline treatment to avoid a dense HUD/concept-board feel.
+- Hid the 8-variant selector from the default Skyship workbench to avoid variant-selection complexity in the primary screen; direct variant URLs remain documented for review.
+- Updated `README.md` to describe the low-density default and the new UI direction.
+
+#### Works
+- Pet Mode, profile assignment, quest submission, task detail timeline, report card review, and approve/revise remain wired through the existing bridge interface.
+- Integration truth remains visible with bridge mode, active implementation, Hermes availability, fallback, profile truth, and execution source.
+- The 8 variants remain previewable by URL, but variant 04 is the default low-density direction.
+
+#### Mocked
+- No new mocked product scope was added.
+
+#### Tested
+- Initial `bun run lint` passed after the structural Guild Hall changes.
+- Browser visual check at `http://127.0.0.1:1420/?variant=skyship-command-deck` confirmed the Hall, Board, and Review screens render with the updated Skyship layout.
+- Visual evidence pass compared the fourth generated reference board at `docs/design-references/jrpg-variants/04-skyship-command-deck.png` with the final live screenshot captured at `/tmp/hermes-guild-skyship-live-final.png`.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+#### Blockers
+- None.
+
+#### Next
+- Continue visual iteration only if design review asks for tighter fidelity.
 
 ### 2026-05-03 21:13 CST — Documentation setup
 
@@ -1596,6 +1705,373 @@ Stop real bridge health checks from failing in native mode when Hermes API is he
 - `cargo check` in `src-tauri`: passed.
 - `curl -sS http://127.0.0.1:8642/health`: returned `{"status": "ok", "platform": "hermes-agent"}` before native launch.
 - `bun run tauri:dev`: compiled and launched `target/debug/hermes-guild` with the native proxy command registered.
+
+### 2026-05-04 03:10 CST — JRPG pixel UI redesign implemented
+
+#### Goal
+Redesign Hermes Guild into a pixel-art JRPG-style workbench while preserving the v0 loop, RealHermes bridge, and mock/real/auto modes.
+
+#### Changed
+- Added `docs/JRPG_PIXEL_STYLE_GUIDE.md` as the focused visual style guide for the redesign.
+- Added the visual plan near the top of this execution log before coding.
+- Updated `src/App.tsx` with JRPG workbench language and visible truth labels: Active Companion, System Rune, party-style Character Cards, Quest Board, Quest Log event names, Review Chamber, Quest Completed report cards, and output provenance.
+- Replaced `src/styles.css` with a restrained pixel JRPG visual system: dark navy field, parchment panels, pixel borders, bronze/gold controls, compact retro headings, readable body text, and state-color cues.
+- Updated `README.md` to document the pixel-art JRPG UI, visible integration truth, character-card truth labels, and Review provenance.
+
+#### Works
+- Pet Mode still creates a quest assigned to the active profile.
+- Quest Board still shows direct assignment, task detail, artifacts, timeline, and progress.
+- Timeline events now render as quest-log labels while preserving the original event messages and sources.
+- Review Chamber still shows report cards with facts, assumptions, known gaps, recommended next action, and approve/revise actions.
+- Integration truth remains visible in the top status box and Guild Hall system rune: bridge mode, active implementation, Hermes availability, fallback reason, profile data source, and execution source.
+- The pet-only route still renders only the Pet Mode surface and is constrained to a compact companion width.
+
+#### Mocked / Derived
+- Mock mode and auto fallback still use MockHermesBridge behavior.
+- Guild character roles and traits remain Guild-defined/static.
+- Real Hermes profile routing is still not claimed because `/v1/runs` does not expose a profile field.
+- Real task artifacts remain Guild-generated from final Hermes API output.
+
+#### Tested
+- `bun run lint`: passed after implementation edits.
+- Browser check on `http://127.0.0.1:1423/`: loaded the redesigned Guild Hall, verified integration truth/system rune, created a pet quest, observed Quest Board progress and quest-log labels, opened Review Chamber, and approved the returned report.
+- Browser check on `http://127.0.0.1:1423/?mode=pet`: verified the pet-only route renders only the Pet Mode surface.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+#### Result
+- JRPG pixel UI redesign verification passed for the web/native compile gates available in this environment.
+- No real provider task was submitted; this pass preserved the RealHermes API bridge code path and verified it through existing bridge factory/API tests and Rust compile checks.
+
+### 2026-05-04 03:35 CST — JRPG variant reference and implementation pass
+
+#### Goal
+Create 8 distinct pixel-art JRPG variants for Hermes Guild as reviewable implementation modes.
+
+#### Changed
+- Generated 8 image reference boards with the image generation skill, one for each required variant and each covering Pet Mode, Guild Hall, Character Cards, Quest Board, Task Detail / Quest Log, Quest Report Card, Review Chamber, and Integration Truth.
+- Copied generated references into `docs/design-references/jrpg-variants/`.
+- Added `docs/JRPG_VARIANT_REFERENCES.md` with variant names, reference board paths, review URLs, distinguishing traits, covered screens, and review notes.
+- Added an in-app `Variant` selector with URL and `localStorage` persistence under `hermes-guild.jrpg-variant`.
+- Implemented 8 presentational variants in `src/styles.css`: Royal Guild Hall, Magitech Workshop, Moon Crystal Sanctuary, Skyship Command Deck, Arcane Archive Library, Mercenary Camp, Dungeon Strategy Terminal, and Cozy Inn Guild.
+- Updated `README.md` with the variant index and direct review URLs.
+
+#### Works
+- Variants are reviewable from the app top bar without changing bridge mode or task state.
+- Direct URLs such as `/?variant=magitech-workshop` and pet-only URLs such as `/?mode=pet&variant=cozy-inn-guild` select the visual variant.
+- The same Pet Mode, Guild Hall, Quest Board, Task Detail, Review Chamber, and Integration Truth components are styled by the selected variant.
+- The v0 loop and bridge calls remain shared; no variant introduces new product surfaces or execution behavior.
+- Integration truth remains visible in every variant through the top system strip and Guild Hall system rune.
+
+#### Mocked / Derived
+- The variant selector is a review/presentation mode only.
+- Image references are design inputs; app UI remains code-native and interactive.
+
+#### Tested
+- `bun run lint`: passed after adding variant selector/types.
+- Browser sweep on `http://127.0.0.1:1424/`: opened all 8 direct variant URLs and confirmed the in-app selector matched the requested variant while Pet Mode, Guild Hall, Character Cards, Integration Truth, and navigation remained visible.
+- Browser check on `http://127.0.0.1:1424/?mode=pet&variant=cozy-inn-guild`: confirmed pet-only review route renders only Pet Mode with the selected visual variant.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+#### Result
+- 8 implemented JRPG variants are reviewable through the in-app selector and direct URLs.
+- The v0 loop and RealHermes API bridge remain shared across all variants; no variant introduces new product scope.
+- Final validation passed for available web and native compile gates.
+
+#### Completion Audit
+- Required docs read: `docs/JRPG_VARIANTS_RUNBOOK.md`, `docs/DESIGN.md`, `docs/PRD.md`, `docs/AGENT_RULES.md`, this execution log, and `README.md`.
+- Image generation requirement: 8 generated reference boards exist under `docs/design-references/jrpg-variants/` and are indexed in `docs/JRPG_VARIANT_REFERENCES.md`.
+- 8 variant requirement: implemented by `uiVariants` in `src/App.tsx` and variant CSS classes in `src/styles.css`.
+- Current page coverage: Pet Mode, Guild Hall, Character Cards, Quest Board, Task Detail / Quest Log, Quest Report Card, Review Chamber, and Integration Truth are shared components styled by every selected variant.
+- Not-just-recolor requirement: variant CSS changes layout composition, panel/framing treatment, pet presentation, timeline styling, report-card styling, and page composition across variants.
+- Scope guard: no multiple pets, party quests, XP/levels, Tavern, Skill Deck, Infirmary, voice input, profile routing, artifact browser, or bridge rewrite were added.
+- Preservation requirement: task creation still calls the selected bridge `submitTask`/`createTask`; approve/revise still call bridge review methods; bridge mode controls and integration truth remain visible.
+- Documentation requirement: `README.md`, `docs/EXECUTION_LOG.md`, and `docs/JRPG_VARIANT_REFERENCES.md` document review paths and validation.
+- Validation requirement: `bun run verify:web`, `cargo fmt --check`, and `cargo check` passed.
+
+### 2026-05-04 19:42 CST — Main Window pixel JRPG UI reset
+
+#### Goal
+Reset the default Guild Hall UI because the previous implementation read as a debug dashboard with pixel borders rather than a low-density pixel JRPG desktop app.
+
+#### Changed
+- Split the default `hall` view out of the old `app-shell` so the first screen renders one cohesive `PixelAppWindow` instead of `PetPanel + top tabs + main content`.
+- Removed production-visible debug controls from the default screen: the large Pet Mode side panel, `Hall / Board / Review / Error / Block` tab row, and oversized integration diagnostics.
+- Kept product navigation as small in-window actions for `Quest Board` and `Review`.
+- Kept bridge mode switching compact in the title bar and kept operational truth in a small Integration Truth strip.
+- Reworked the Guild Hall first screen around one active companion card, one active quest card, compact review/result, compact quest log, small truth strip, and bottom command bar.
+- Softened the pixel panel frame and parchment palette to reduce the harsh yellow-card effect while retaining asset-based pixel frames.
+- Updated `README.md` to document the default production main window and removed-debug-chrome behavior.
+
+#### Preserved
+- Pet-only mode still renders the dedicated Pet Mode surface with `?mode=pet`.
+- Pet/Guild command input still submits through `submitTask` or mock `createTask`.
+- Quest Board and Review actions remain wired to existing state.
+- Approve/revise still call the existing bridge review methods.
+- RealHermes bridge mode, mock mode, real mode, and auto mode remain shared through the existing bridge config.
+- Integration truth remains visible and honest; Guild roles are still labeled as Guild-defined rather than live Hermes profile routing.
+
+#### Visual Check
+- Captured `/private/tmp/hermes-main-window-reset-2.png` from `http://127.0.0.1:1425/?variant=skyship-command-deck` at `1600x1100`.
+- Screenshot check confirmed the first screen no longer shows the large Pet Mode side panel, debug-style top tabs, Error/Block QA buttons, or large diagnostic table.
+- Remaining production controls on the first screen are compact bridge mode, Quest Board, Review, active companion, active quest, review/result, quest log, Integration Truth, and command input.
+
+#### Validation
+- `bun run lint`: passed after TypeScript adjustments.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-04 20:07 CST — Main Window high-fidelity polish pass
+
+#### Goal
+Polish the accepted main-window structure so it reads less like a pixel-styled admin form and more like a low-density JRPG companion workbench.
+
+#### Changed
+- Strengthened the Active Companion card with a larger centered portrait, stronger character name treatment, a status sentence, and a less form-heavy profile switcher.
+- Added a polished empty Active Quest state with three suggested prompt chips: `Prepare a demo brief`, `Summarize recent notes`, and `Review returned quests`. Chips fill the command input only; task submission still requires Send.
+- Replaced the production-visible bridge `Apply` control with a titlebar bridge status chip. Bridge mode configuration now lives in a details panel with a `Save` action.
+- Summarized Integration Truth on the main strip as compact product truth: mode, fallback state, Hermes availability, and Guild-defined profiles.
+- Moved long technical fallback details into a `Diagnostics` disclosure instead of showing raw fetch errors on the main screen.
+- Softened parchment tones, muted gold trim, shadows, button treatment, and background texture.
+- Adjusted viewport rhythm so the main cards, Integration Truth, and bottom command input are visible together in the first desktop screenshot.
+- Updated `README.md` to document the bridge status details and empty quest prompt chips.
+
+#### Preserved
+- The accepted main window layout remains: titlebar, active companion, active quest, compact review/result, compact quest log, truth strip, and command input.
+- RealHermes bridge, mock/real/auto modes, task submit, approve/revise, and integration truth source data remain unchanged.
+- Suggested prompt chips do not create product scope; they only set the existing command input value.
+
+#### Visual Check
+- Captured `/private/tmp/hermes-polish-pass-5.png` from `http://127.0.0.1:1425/?variant=skyship-command-deck` at `1600x1100`.
+- Screenshot check confirmed the first screen shows Brass with stronger visual presence, a designed empty quest state, compact bridge truth without raw technical error text, and the bottom command bar.
+
+#### Validation
+- `bun run lint`: passed after TypeScript/CSS edits.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-04 20:29 CST — Design-system unification pass
+
+#### Goal
+Unify Guild Hall and Quest Board so they feel like two screens from the same low-density pixel JRPG desktop app rather than separate admin/productivity surfaces.
+
+#### Changed
+- Moved Quest Board and Review into the same `PixelAppWindow` shell used by Guild Hall.
+- Added shared production app header behavior with the same titlebar bridge status chip, compact navigation, and no large bridge diagnostics on Quest Board.
+- Added a direct initial-view review hook: `?view=board` and `?view=review` initialize existing app state to those screens without adding routing behavior.
+- Refactored Quest Board into role-specific pixel panels:
+  - `quest-post-panel` for Quest Posting
+  - `quest-log-panel` for the board list
+  - `quest-detail-panel` for task detail and timeline
+  - shared `PixelTruthStrip` as the Board status strip
+- Converted Quest Posting from generic form controls to pixel-kit `PixelPanel`, `PixelInput`, `PixelButton`, and contract-like advanced brief disclosure.
+- Converted Quest Detail from a plain `panel task-detail` content area to a `PixelPanel` task sheet with shared badge/progress/timeline styling.
+- Updated `README.md` with the unified Quest Board review URL and shared design-system notes.
+
+#### Preserved
+- Existing task creation, selected task, advanced brief fields, assignee selection, and bridge submit/create behavior.
+- RealHermes bridge, mock/real/auto modes, compact integration truth, and approve/revise flow.
+- Low-density direction; no dense HUD, new game systems, or debug/test UI was added.
+
+#### Visual Check
+- Captured `/private/tmp/hermes-unified-hall.png` for the Guild Hall first screen.
+- Captured `/private/tmp/hermes-unified-board.png` for `http://127.0.0.1:1425/?variant=skyship-command-deck&view=board`.
+- Screenshot check confirmed both screens share the same desktop shell, app header, bridge status chip, parchment pixel panels, compact status strip, and non-debug production navigation.
+
+#### Validation
+- `bun run lint`: passed after the Quest Board refactor.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-04 21:24 CST — Pixel UI Kit asset implementation pass
+
+#### Goal
+Use generated high-resolution pixel-art asset sheets as source sheets for reusable Pixel JRPG UI Kit assets, then wire those assets into the kit and showcase.
+
+#### Changed
+- Added `docs/PIXEL_UI_KIT_ASSET_IMPLEMENTATION.md` with the asset-sheet extraction and implementation requirements.
+- Kept the original generated source sheets under `src/assets/pixel-ui/source-sheets/`.
+- Extracted first-pass stable PNG assets into:
+  - `src/assets/pixel-ui/frames/`
+  - `src/assets/pixel-ui/buttons/`
+  - `src/assets/pixel-ui/inputs/`
+  - `src/assets/pixel-ui/badges/`
+  - `src/assets/pixel-ui/icons/`
+  - `src/assets/pixel-ui/avatars/`
+  - `src/assets/pixel-ui/mascots/`
+  - `src/assets/pixel-ui/ornaments/`
+- Added `src/styles/pixel-assets.css` to apply extracted assets with CSS `border-image` / `border-image-slice`, asset-backed icons, asset-backed avatars, mascot states, and global pixel sharpness rules.
+- Imported `pixel-assets.css` after the existing pixel theme so extracted assets override CSS-only chrome where feasible.
+- Added/refined Pixel UI Kit exports: `PixelTitleBar`, `PixelTextarea`, `PixelSelect`, `PixelChip`, `PixelIcon`, `PixelMascot`, and `PixelQuestLog`.
+- Updated `PixelAvatar` to use sheet-derived avatar assets by role/state when no explicit icon override is supplied.
+- Expanded `/pixel-ui-showcase` to display panel variants, button states, input states, badges, chips, icon catalog, avatar states, mascot states, quest card, review card, truth strip, and command bar.
+- Updated `README.md` with asset sheet paths, extracted asset paths, and the asset CSS entry point.
+
+#### Decisions
+- Exact transparent cutouts were not available with local tooling in this pass, so assets are stable cropped PNGs from the sheets. Transparent PNG cleanup remains a future fidelity pass.
+- Existing SVG fallback frames and CSS styling remain in place under the extracted PNG asset layer, so the UI remains robust if a crop is imperfect.
+- Button, input, and badge crops are used as `border-image` chrome without filling centers where embedded source-sheet text would be inappropriate.
+
+#### Preserved
+- Guild Hall continues to use the Pixel UI Kit components and existing bridge/task/review behavior.
+- RealHermes bridge, mock/real/auto modes, task submit, review approve/revise, and integration truth visibility remain unchanged.
+
+#### Visual Check
+- Captured `/private/tmp/hermes-asset-showcase.png` for `http://127.0.0.1:1425/pixel-ui-showcase`; verified the showcase renders panel frames, button/input/badge chrome, icon catalog assets, avatar states, mascot states, quest card, review card, truth strip, and command bar.
+- Captured `/private/tmp/hermes-asset-guild-hall.png` for `http://127.0.0.1:1425/?variant=skyship-command-deck`; verified Guild Hall uses the asset-backed shell, 9-slice parchment panels, extracted companion avatar, compact truth strip, and asset-backed command controls.
+
+#### Validation
+- `bun run lint`: passed after component and asset CSS updates.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-04 21:45 CST — Pixel UI Kit productization pass
+
+#### Goal
+Use the asset-backed Pixel UI Kit on the real product screens while removing rough source-sheet artifacts from production chrome.
+
+#### Changed
+- Removed noisy cropped source-sheet ornament usage from the production title bar and section header dividers; these now render clean CSS pixel rules instead of tiny unreadable embedded labels.
+- Kept extracted reusable assets in use for panel chrome, buttons, inputs, badges, icons, avatars, mascot states, and command controls.
+- Replaced Guild Hall lucide action icons with extracted `PixelIcon` assets for navigation, review, quest log, approve, revise, and returned-quest actions.
+- Replaced Guild Hall bridge/profile selects and Quest Board assignee selects with `PixelSelect` so configuration controls share the kit treatment.
+- Added role-specific `PixelIcon` headers to Companion, Quest Log, Quest Posting, Quest Board, and Quest Detail panels.
+- Updated Quest Board create and empty-detail states to use extracted pixel icons rather than generic placeholder icons.
+- Brought Review Chamber into the Pixel UI Kit where feasible by using `PixelPanel`, `PixelIcon`, `PixelBadge`, `PixelInput`, and `PixelButton` for empty and returned-report states.
+- Updated `README.md` to clarify that production screens should not expose noisy source-sheet labels or embedded cropped text.
+
+#### Preserved
+- No new assets were created.
+- Source sheets remain stored as references only; they are not pasted into the UI.
+- Guild Hall still shows active companion, active quest, review/result, quest log, integration truth, and command bar.
+- Quest Board still supports quest posting, quest list, quest detail/timeline, and compact bridge truth.
+- Existing bridge behavior, mock/real/auto modes, task submit, and approve/revise flow remain unchanged.
+
+#### Visual Check
+- Captured `/private/tmp/hermes-productized-hall.png` for Guild Hall; verified the screen no longer shows tiny source-sheet text in panel headers and still uses extracted avatars, icons, buttons, badges, and command controls.
+- Captured `/private/tmp/hermes-productized-board.png` for Quest Board; verified it shares the same app shell, panel language, controls, compact truth strip, and clean header treatment.
+- Captured `/private/tmp/hermes-productized-review.png` for Review Chamber; verified the optional review pass uses Pixel UI Kit panel, icon, and empty-state treatment.
+- Captured `/private/tmp/hermes-productized-showcase.png`; verified `/pixel-ui-showcase` remains available after production cleanup.
+
+#### Validation
+- `bun run lint`: passed after the productization edits.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-04 22:00 CST — Production asset cleanup pass
+
+#### Goal
+Clean up the asset-backed Pixel UI Kit integration so real screens read as production components rather than asset-sheet crops or showcase panels.
+
+#### Changed
+- Reduced the top titlebar decorative strip to a clean, low-noise CSS pixel rule instead of a tall patterned band.
+- Simplified section header rules to real HTML titles plus a clean CSS divider, avoiding cropped source-sheet labels and unreadable embedded text.
+- Replaced source-cropped nav button chrome in the production toolbar with clean CSS pixel buttons while keeping extracted pixel icons and real HTML labels.
+- Improved Quest Board empty states with explicit quest-board and quest-detail inbox surfaces that explain posting, selecting, timeline, artifacts, and review state.
+- Improved Review Chamber empty state from one huge blank parchment panel into a two-panel review inbox / result slip surface.
+- Fixed an empty-state CSS selector that treated `PixelIcon` spans as text chips, which made icons render as blank parchment squares.
+- Updated `README.md` to document the production rule: assets provide frame/icon/avatar/texture/control chrome, while titles, labels, and business copy stay as HTML text.
+
+#### Preserved
+- No new assets were created.
+- `/pixel-ui-showcase` remains available.
+- Guild Hall still keeps active companion, active quest, review/result, quest log, integration truth, and command bar.
+- Quest Board still keeps quest posting, quest list, quest detail/timeline, and compact bridge truth.
+- Review approve/revise wiring remains unchanged.
+- RealHermes bridge, mock/real/auto modes, task submit flow, and visible integration truth remain unchanged.
+
+#### Visual Check
+- Captured `/private/tmp/hermes-cleanup-hall.png`; verified Guild Hall keeps the same production layout with cleaner top strip and nav buttons.
+- Captured `/private/tmp/hermes-cleanup-board.png`; verified Quest Board empty states now render readable pixel icons and product copy, without source-sheet artifacts.
+- Captured `/private/tmp/hermes-cleanup-review.png`; verified Review Chamber is a two-panel review surface rather than one blank parchment panel.
+- Captured `/private/tmp/hermes-cleanup-showcase.png`; verified the showcase route still renders.
+
+#### Validation
+- `bun run lint`: passed after cleanup edits.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-04 23:37 CST — Asset correctness and AvatarFrame alignment pass
+
+#### Goal
+Keep the current Pixel JRPG UI direction and character identity, but make the extracted assets behave like reusable transparent game assets and align avatars consistently inside one shared frame.
+
+#### Asset Audit
+- Standalone icon, avatar, and mascot PNGs were still RGB crops from source sheets, with edge backgrounds and some source-sheet label fragments behaving like screenshot tiles.
+- Frame, button, input, badge, texture, and source-sheet directories were already organized under `src/assets/pixel-ui/` and were kept in place with stable names.
+- Panel/button/input/badge frame assets remain used as chrome; standalone icon/avatar/mascot files were the main transparency issue.
+
+#### Changed
+- Added `scripts/cleanup-pixel-assets.py`, a local PNG cleanup helper using the Python standard library only.
+- Cleaned existing icon, avatar, and mascot PNGs in place to RGBA transparency with stable filenames.
+- The cleanup pass flood-fills edge backgrounds, removes small source-sheet label fragments from standalone icons/mascots, and trims alpha bounds so assets can render on navy and parchment surfaces without dark screenshot boxes.
+- Added `PixelAvatarFrame` and routed `PixelAvatar` through it.
+- Reworked avatar CSS into one fixed frame, one centered safe area, contained sprite rendering, hidden overflow, and `image-rendering: pixelated`.
+- Removed the previous mismatched avatar sizing where a small sprite container held a larger background image.
+- Increased Guild Hall companion avatar safe area without changing the character art.
+- Added derived Guild Hall Quest Log preview rows when no real task timeline exists: companion ready, bridge checked, and review inbox. These are grounded in current app state, not fake quest history.
+- Added a Quest Contract note to Quest Posting so the left panel reads more like posting a quest and less like a generic form.
+- Updated `README.md` with the transparent asset cleanup helper and shared AvatarFrame rules.
+
+#### Preserved
+- No avatar character redesign or regeneration was performed.
+- Current dark navy shell, parchment panels, muted gold trim, pixel buttons, badges, bridge status strip, and page structure were preserved.
+- Guild Hall, Quest Board, Review Chamber, navigation, compact integration truth, task submit flow, approve/revise flow, mock/real/auto bridge modes, and RealHermes bridge behavior were preserved.
+- `/pixel-ui-showcase` remains available.
+
+#### Visual Check
+- Captured `/private/tmp/hermes-asset-correctness-hall.png`; verified Guild Hall avatars/icons render without dark screenshot boxes, the companion is centered in the shared frame, and Quest Log has live state preview rows.
+- Captured `/private/tmp/hermes-asset-correctness-board.png`; verified Quest Posting has a quest-contract treatment and empty states use transparent icons with clearer hierarchy.
+- Captured `/private/tmp/hermes-asset-correctness-review.png`; verified Review Chamber keeps the review inbox / result slip structure with transparent icons and readable HTML copy.
+- Captured `/private/tmp/hermes-asset-correctness-showcase.png`; verified the showcase still renders cleaned icons, avatars, mascot states, controls, panels, and sample cards.
+
+#### Validation
+- `bun run lint`: passed after transparency cleanup and AvatarFrame changes.
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
+
+### 2026-05-04 23:49 CST — Repo cleanup before commit
+
+#### Goal
+Remove unnecessary prompt/reference docs and unused pixel assets before committing the Pixel UI Kit work.
+
+#### Removed
+- Removed generated design reference boards under `docs/design-references/`.
+- Removed prompt/runbook/reference docs that are no longer needed for production handoff:
+  - `docs/JRPG_PIXEL_STYLE_GUIDE.md`
+  - `docs/JRPG_VARIANTS_RUNBOOK.md`
+  - `docs/JRPG_VARIANT_REFERENCES.md`
+  - `docs/LOW_DENSITY_PIXEL_JRPG_GOAL.md`
+- Removed unneeded generated source sheets under `src/assets/pixel-ui/source-sheets/`.
+- Removed unused cropped asset fragments:
+  - `src/assets/pixel-ui/frames/titlebar-ornate.png`
+  - `src/assets/pixel-ui/frames/divider-flourish.png`
+  - `src/assets/pixel-ui/frames/section-header-icon-left.png`
+  - `src/assets/pixel-ui/buttons/tab-active.png`
+  - `src/assets/pixel-ui/buttons/tab-inactive.png`
+  - `src/assets/pixel-ui/ornaments/`
+- Removed `.DS_Store` files from docs artifacts.
+
+#### Kept
+- Kept production docs referenced by README: `docs/PIXEL_UI_KIT.md`, `docs/PIXEL_UI_KIT_ASSET_IMPLEMENTATION.md`, `docs/WEB_FIDELITY_PASS.md`, and `docs/LOW_DENSITY_PIXEL_JRPG_UI.md`.
+- Kept extracted reusable runtime assets under `frames`, `buttons`, `inputs`, `badges`, `icons`, `avatars`, `mascots`, and `textures`.
+- Kept `scripts/cleanup-pixel-assets.py` because it documents and reproduces the transparent asset cleanup.
+- Updated README and `docs/PIXEL_UI_KIT_ASSET_IMPLEMENTATION.md` so they no longer point at removed source sheets, ornaments, or generated reference boards.
+
+#### Validation
+- `bun run verify:web`: passed; Tauri config check passed, TypeScript passed, 36 tests / 151 assertions passed, and Vite production build passed.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.
 
 ## Scope Guard
 Deferred:
