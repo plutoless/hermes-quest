@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { createBridgeFromConfig, loadBridgeConfig, saveBridgeConfig } from './bridgeFactory';
-import type { BridgeConfig, HermesApiClient } from './types';
+import type { BridgeConfig, HermesApiClient, HermesDashboardApiClient } from './types';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const defaultConfig: BridgeConfig = {
   bridgeMode: 'auto',
   hermesApiBaseUrl: 'http://127.0.0.1:8642',
+  hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
 };
 
 function installFakeStorage() {
@@ -29,7 +30,42 @@ function installFakeStorage() {
 }
 
 function legacyConfigWithManualProfileName(name: string): BridgeConfig & { realProfileName: string } {
-  return { bridgeMode: 'real', hermesApiBaseUrl: 'http://127.0.0.1:8642', realProfileName: name };
+  return {
+    bridgeMode: 'real',
+    hermesApiBaseUrl: 'http://127.0.0.1:8642',
+    hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
+    realProfileName: name,
+  };
+}
+
+function dashboardClient(status: { ok: boolean; message: string }, protectedAccess = false): HermesDashboardApiClient {
+  const endpoint = async () => ({ ok: status.ok, status: status.ok ? 200 : 503, data: {} });
+  return {
+    hasProtectedAccess: () => protectedAccess,
+    checkStatus: async () => status,
+    listSessions: endpoint,
+    getSession: endpoint,
+    listSessionMessages: endpoint,
+    searchSessions: endpoint,
+    getConfig: endpoint,
+    getConfigDefaults: endpoint,
+    getConfigSchema: endpoint,
+    updateConfig: endpoint,
+    getEnv: endpoint,
+    updateEnv: endpoint,
+    deleteEnv: endpoint,
+    getLogs: endpoint,
+    getAnalyticsUsage: endpoint,
+    listCronJobs: endpoint,
+    createCronJob: endpoint,
+    pauseCronJob: endpoint,
+    resumeCronJob: endpoint,
+    triggerCronJob: endpoint,
+    deleteCronJob: endpoint,
+    listSkills: endpoint,
+    toggleSkill: endpoint,
+    listToolsets: endpoint,
+  };
 }
 
 describe('bridgeFactory', () => {
@@ -43,11 +79,13 @@ describe('bridgeFactory', () => {
     saveBridgeConfig({
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:9999',
+      hermesDashboardBaseUrl: 'http://127.0.0.1:9229',
     });
 
     expect(loadBridgeConfig()).toEqual({
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:9999',
+      hermesDashboardBaseUrl: 'http://127.0.0.1:9229',
     });
   });
 
@@ -64,7 +102,18 @@ describe('bridgeFactory', () => {
     expect(loadBridgeConfig()).toEqual({
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:8642',
+      hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
     });
+  });
+
+  test('bridge config normalizes separate gateway and dashboard base URLs', () => {
+    saveBridgeConfig({
+      bridgeMode: 'auto',
+      hermesApiBaseUrl: ' http://127.0.0.1:8642/ ',
+      hermesDashboardBaseUrl: ' http://127.0.0.1:9119/ ',
+    });
+
+    expect(loadBridgeConfig()).toEqual(defaultConfig);
   });
 
   test('creates mock bridge directly in mock mode', async () => {
@@ -74,6 +123,7 @@ describe('bridgeFactory', () => {
     expect(status.bridgeMode).toBe('mock');
     expect(status.activeImplementation).toBe('mock');
     expect(status.hermesAvailable).toBe('unchecked');
+    expect(status.dashboardAvailable).toBe('unchecked');
     expect(status.logsSummary).toContain('Mock Hermes Bridge');
     expect(status.warnings.some((warning) => warning.includes('Bridge mode: mock'))).toBe(true);
   });
@@ -86,7 +136,10 @@ describe('bridgeFactory', () => {
       },
     };
 
-    const bridge = await createBridgeFromConfig(defaultConfig, { apiClient });
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient,
+      dashboardClient: dashboardClient({ ok: true, message: 'Dashboard API healthy' }),
+    });
     const status = bridge.getSnapshot().systemStatus;
 
     expect(status.bridgeMode).toBe('auto');
@@ -94,24 +147,400 @@ describe('bridgeFactory', () => {
     expect(status.hermesAvailable).toBe('unavailable');
     expect(status.fallbackReason).toBe('Hermes API refused connection');
     expect(status.gatewayStatus).toBe('mocked');
+    expect(status.hermesDashboardBaseUrl).toBe('http://127.0.0.1:9119');
+    expect(status.dashboardAvailable).toBe('unchecked');
     expect(status.logsSummary).toContain('fallback to mock');
     expect(status.warnings).toContain('Auto mode fallback: Hermes API refused connection');
   });
 
-  test('auto mode uses real bridge when Hermes health passes', async () => {
+  test('auto mode uses real bridge when Hermes health passes without requiring protected dashboard REST', async () => {
     const apiClient: HermesApiClient = {
       checkHealth: async () => ({ ok: true, message: 'Hermes API healthy' }),
       runTask: async () => ({ ok: true, output: 'auto real output', events: [] }),
     };
 
-    const bridge = await createBridgeFromConfig(defaultConfig, { apiClient });
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient,
+      dashboardClient: dashboardClient({ ok: true, message: 'Dashboard API healthy' }),
+    });
     const status = bridge.getSnapshot().systemStatus;
 
     expect(status.bridgeMode).toBe('auto');
     expect(status.activeImplementation).toBe('real');
     expect(status.hermesAvailable).toBe('available');
     expect(status.gatewayStatus).toBe('connected');
+    expect(status.dashboardAvailable).toBe('available');
+    expect(status.hermesDashboardBaseUrl).toBe('http://127.0.0.1:9119');
+    expect(status.dataSources?.skills).toBe('unavailable');
+    expect(status.warnings).toContain('Hermes dashboard protected REST skipped: session token unavailable.');
     expect(status.logsSummary).toContain('Bridge mode: auto');
+  });
+
+  test('auto mode keeps real gateway active when dashboard compatibility is unavailable', async () => {
+    const apiClient: HermesApiClient = {
+      checkHealth: async () => ({ ok: true, message: 'Gateway API healthy' }),
+      runTask: async () => ({ ok: true, output: 'real output', events: [] }),
+    };
+
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient,
+      dashboardClient: dashboardClient({ ok: false, message: 'Dashboard refused connection' }),
+    });
+    const status = bridge.getSnapshot().systemStatus;
+
+    expect(status.activeImplementation).toBe('real');
+    expect(status.hermesAvailable).toBe('available');
+    expect(status.dashboardAvailable).toBe('unavailable');
+    expect(status.dataSources?.skills).toBe('unavailable');
+    expect(status.warnings).toContain('Hermes dashboard compatibility unavailable: Dashboard refused connection');
+    expect(status.logsSummary).toContain('Dashboard compatibility unavailable');
+  });
+
+  test('real mode does not call protected dashboard compatibility endpoints without token access', async () => {
+    const calls: string[] = [];
+    const protectedEndpoint = async (name: string) => {
+      calls.push(name);
+      return { ok: true, status: 200, data: {} };
+    };
+
+    const bridge = await createBridgeFromConfig(
+      { ...defaultConfig, bridgeMode: 'real' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Gateway API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+        },
+        dashboardClient: {
+          ...dashboardClient({ ok: true, message: 'Dashboard API healthy' }, false),
+          listSkills: () => protectedEndpoint('listSkills'),
+          listToolsets: () => protectedEndpoint('listToolsets'),
+          listSessions: () => protectedEndpoint('listSessions'),
+          getLogs: () => protectedEndpoint('getLogs'),
+        },
+      },
+    );
+
+    expect(calls).toEqual([]);
+    expect(bridge.getSnapshot().systemStatus.dataSources?.skills).toBe('unavailable');
+    expect(bridge.getSnapshot().systemStatus.dataSources?.sessions).toBe('unavailable');
+  });
+
+  test('real mode maps dashboard compatibility skills and toolsets onto the active Hermes profile when token access is explicit', async () => {
+    const bridge = await createBridgeFromConfig(
+      { ...defaultConfig, bridgeMode: 'real' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Gateway API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+        },
+        dashboardClient: {
+          ...dashboardClient({ ok: true, message: 'Dashboard API healthy' }, true),
+          listSkills: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+              skills: [
+                {
+                  id: 'research',
+                  name: 'Research',
+                  category: 'analysis',
+                  description: 'Search and synthesize sources.',
+                  trigger: 'research',
+                  enabled: true,
+                },
+              ],
+            },
+          }),
+          listToolsets: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+              toolsets: [
+                { name: 'browser', enabled: true },
+                { name: 'filesystem', enabled: false },
+              ],
+            },
+          }),
+        },
+      },
+    );
+
+    const snapshot = bridge.getSnapshot();
+    const activeAgent = snapshot.agents.find((agent) => agent.id === snapshot.activeProfileId);
+
+    expect(activeAgent?.skills).toEqual([
+      {
+        id: 'research',
+        name: 'Research',
+        category: 'analysis',
+        description: 'Search and synthesize sources.',
+        trigger: 'research',
+        enabled: true,
+      },
+    ]);
+    expect(activeAgent?.equipment).toContain('Toolset: browser');
+    expect(activeAgent?.equipment).not.toContain('Toolset: filesystem');
+    expect(snapshot.systemStatus.dataSources?.skills).toBe('dashboard-compatibility');
+    expect(snapshot.systemStatus.dataSources?.toolsets).toBe('dashboard-compatibility');
+  });
+
+  test('real mode maps gateway REST models and capabilities onto the active Hermes profile', async () => {
+    const bridge = await createBridgeFromConfig(
+      { ...defaultConfig, bridgeMode: 'real' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Gateway API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          checkDetailedHealth: async () => ({ ok: true, status: 200, data: { status: 'ok' } }),
+          listModels: async () => ({ ok: true, status: 200, data: { data: [{ id: 'hermes-local' }] } }),
+          getCapabilities: async () => ({ ok: true, status: 200, data: { capabilities: ['runs', 'responses'] } }),
+          runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+        },
+        dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      },
+    );
+
+    const snapshot = bridge.getSnapshot();
+    const activeAgent = snapshot.agents.find((agent) => agent.id === snapshot.activeProfileId);
+
+    expect(snapshot.systemStatus.providerHealth).toBe('healthy');
+    expect(snapshot.systemStatus.dataSources?.models).toBe('gateway-rest');
+    expect(snapshot.systemStatus.dataSources?.capabilities).toBe('gateway-rest');
+    expect(activeAgent?.equipment).toContain('Model: hermes-local');
+    expect(activeAgent?.equipment).toContain('Capability: runs');
+    expect(activeAgent?.equipment).toContain('Capability: responses');
+  });
+
+  test('real mode maps dashboard operational REST data without exposing secret values', async () => {
+    const bridge = await createBridgeFromConfig(
+      { ...defaultConfig, bridgeMode: 'real' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Gateway API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+        },
+        dashboardClient: {
+          ...dashboardClient({ ok: true, message: 'Dashboard API healthy' }, true),
+          listSessions: async () => ({ ok: true, status: 200, data: { sessions: [{ id: 's1' }, { id: 's2' }] } }),
+          getSession: async (sessionId) => ({ ok: true, status: 200, data: { id: sessionId, title: 'Session one' } }),
+          listSessionMessages: async (sessionId) => ({
+            ok: true,
+            status: 200,
+            data: { messages: [{ session_id: sessionId, role: 'user' }, { session_id: sessionId, role: 'assistant' }] },
+          }),
+          getLogs: async () => ({ ok: true, status: 200, data: { logs: [{ level: 'warning' }, { level: 'info' }] } }),
+          getAnalyticsUsage: async () => ({ ok: true, status: 200, data: { requests: 12, tokens: 3456 } }),
+          listCronJobs: async () => ({ ok: true, status: 200, data: { jobs: [{ id: 'daily', enabled: true }] } }),
+          getConfig: async () => ({ ok: true, status: 200, data: { default_model: 'hermes-local' } }),
+          getConfigDefaults: async () => ({ ok: true, status: 200, data: { default_model: 'auto' } }),
+          getConfigSchema: async () => ({ ok: true, status: 200, data: { properties: { default_model: {} } } }),
+          getEnv: async () => ({
+            ok: true,
+            status: 200,
+            data: {
+              OPENAI_API_KEY: 'sk-live-secret',
+              ANTHROPIC_API_KEY: { set: true, value: 'claude-secret' },
+              EMPTY_KEY: '',
+            },
+          }),
+        },
+      },
+    );
+
+    const status = bridge.getSnapshot().systemStatus;
+
+    expect(status.operationalData?.sessionsSummary).toBe('2 dashboard compatibility sessions');
+    expect(status.operationalData?.sessionMessagesSummary).toBe('2 messages in session s1');
+    expect(status.operationalData?.logsSummary).toBe('2 log entries, 1 warning/error');
+    expect(status.operationalData?.analyticsSummary).toBe('12 requests, 3456 tokens');
+    expect(status.operationalData?.cronSummary).toBe('1 cron job');
+    expect(status.operationalData?.configSummary).toBe('config, defaults, schema available');
+    expect(status.operationalData?.envSummary).toBe('2 env keys configured');
+    expect(JSON.stringify(status.operationalData)).not.toContain('sk-live-secret');
+    expect(JSON.stringify(status.operationalData)).not.toContain('claude-secret');
+    expect(status.dataSources?.sessions).toBe('dashboard-compatibility');
+    expect(status.dataSources?.logs).toBe('dashboard-compatibility');
+    expect(status.dataSources?.analytics).toBe('dashboard-compatibility');
+    expect(status.dataSources?.config).toBe('dashboard-compatibility');
+    expect(status.dataSources?.env).toBe('dashboard-compatibility');
+    expect(status.dataSources?.cronJobs).toBe('dashboard-compatibility');
+  });
+
+  test('real mode initialization does not call dashboard write endpoints', async () => {
+    const writes: string[] = [];
+    const writeEndpoint = async (name: string) => {
+      writes.push(name);
+      return { ok: true, status: 200, data: {} };
+    };
+
+    await createBridgeFromConfig(
+      { ...defaultConfig, bridgeMode: 'real' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Gateway API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+        },
+        dashboardClient: {
+          ...dashboardClient({ ok: true, message: 'Dashboard API healthy' }),
+          updateConfig: () => writeEndpoint('updateConfig'),
+          updateEnv: () => writeEndpoint('updateEnv'),
+          deleteEnv: () => writeEndpoint('deleteEnv'),
+          createCronJob: () => writeEndpoint('createCronJob'),
+          pauseCronJob: () => writeEndpoint('pauseCronJob'),
+          resumeCronJob: () => writeEndpoint('resumeCronJob'),
+          triggerCronJob: () => writeEndpoint('triggerCronJob'),
+          deleteCronJob: () => writeEndpoint('deleteCronJob'),
+          toggleSkill: () => writeEndpoint('toggleSkill'),
+        },
+      },
+    );
+
+    expect(writes).toEqual([]);
+  });
+
+  test('real mode maps gateway jobs when the gateway jobs endpoint is available', async () => {
+    const bridge = await createBridgeFromConfig(
+      { ...defaultConfig, bridgeMode: 'real' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Gateway API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          listJobs: async () => ({ ok: true, status: 200, data: { jobs: [{ id: 'j1' }, { id: 'j2' }, { id: 'j3' }] } }),
+          runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+        },
+        dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      },
+    );
+
+    const status = bridge.getSnapshot().systemStatus;
+
+    expect(status.operationalData?.gatewayJobsSummary).toBe('3 gateway jobs');
+    expect(status.dataSources?.gatewayJobs).toBe('gateway-rest');
+  });
+
+  test('real mode can stop a running gateway run when the run id is known', async () => {
+    let runStarted: ((value: never) => void) | undefined;
+    const stoppedRuns: string[] = [];
+    const bridge = await createBridgeFromConfig(
+      { ...defaultConfig, bridgeMode: 'real' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Gateway API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          runTask: async ({ onRunStarted }) => {
+            onRunStarted?.('run-123');
+            await new Promise<never>((resolve) => {
+              runStarted = resolve;
+            });
+            return { ok: true, output: 'not reached', events: [] };
+          },
+          stopRun: async (runId) => {
+            stoppedRuns.push(runId);
+            return { ok: true, status: 200, data: { status: 'stopped' } };
+          },
+        },
+        dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      },
+    );
+
+    const taskId = bridge.createTask({ brief: 'Keep running.', assigneeId: bridge.getSnapshot().activeProfileId, type: 'pet' });
+    await wait(10);
+
+    const stopped = await bridge.stopTask?.(taskId);
+    const task = bridge.getSnapshot().tasks.find((item) => item.id === taskId);
+
+    expect(stopped).toBe(true);
+    expect(stoppedRuns).toEqual(['run-123']);
+    expect(task?.state).toBe('blocked');
+    expect(task?.timeline.at(-1)?.message).toBe('Hermes gateway run stopped by the user.');
+    runStarted?.(undefined as never);
+  });
+
+  test('real mode records gateway run status when run status endpoint is available', async () => {
+    const bridge = await createBridgeFromConfig(
+      { ...defaultConfig, bridgeMode: 'real' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Gateway API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          runTask: async ({ onRunStarted }) => {
+            onRunStarted?.('run-123');
+            return { ok: true, runId: 'run-123', output: 'Done.', events: [{ event: 'run.completed', output: 'Done.' }] };
+          },
+          getRun: async (runId) => ({ ok: true, status: 200, data: { id: runId, status: 'completed' } }),
+        },
+        dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      },
+    );
+
+    const taskId = bridge.createTask({ brief: 'Check status.', assigneeId: bridge.getSnapshot().activeProfileId, type: 'pet' });
+    await wait(20);
+
+    const task = bridge.getSnapshot().tasks.find((item) => item.id === taskId);
+
+    expect(task?.timeline.map((event) => event.message)).toContain('Gateway run status: completed.');
+    expect(bridge.getSnapshot().systemStatus.dataSources?.runStatus).toBe('gateway-rest');
+  });
+
+  test('real mode reports stop unavailable when a running task has no gateway run id', async () => {
+    let release: ((value: never) => void) | undefined;
+    const bridge = await createBridgeFromConfig(
+      { ...defaultConfig, bridgeMode: 'real' },
+      {
+        apiClient: {
+          checkHealth: async () => ({
+            ok: true,
+            message: 'Gateway API healthy',
+            profile: { id: 'api-profile', name: 'API Profile' },
+          }),
+          runTask: async () => {
+            await new Promise<never>((resolve) => {
+              release = resolve;
+            });
+            return { ok: true, output: 'not reached', events: [] };
+          },
+        },
+        dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      },
+    );
+
+    const taskId = bridge.createTask({ brief: 'No run id yet.', assigneeId: bridge.getSnapshot().activeProfileId, type: 'pet' });
+    await wait(10);
+
+    const stopped = await bridge.stopTask?.(taskId);
+    const status = bridge.getSnapshot().systemStatus;
+
+    expect(stopped).toBe(false);
+    expect(status.warnings).toContain('Stop unavailable: Hermes run id is not known for this task.');
+    release?.(undefined as never);
   });
 
   test('real mode never falls back to mock when Hermes health fails', async () => {

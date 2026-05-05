@@ -3,6 +3,7 @@ import type {
   HermesApiRunEvent,
   HermesApiRunTaskInput,
   HermesApiRunTaskResult,
+  HermesEndpointResult,
   HermesHealth,
   HermesProfileMetadata,
 } from './types';
@@ -31,6 +32,74 @@ export class FetchHermesApiClient implements HermesApiClient {
     }
   }
 
+  async checkDetailedHealth() {
+    return this.getJson('/health/detailed');
+  }
+
+  async listModels() {
+    return this.getJson('/v1/models');
+  }
+
+  async getCapabilities() {
+    return this.getJson('/v1/capabilities');
+  }
+
+  async createChatCompletion(body: unknown) {
+    return this.requestJson('POST', '/v1/chat/completions', body);
+  }
+
+  async createResponse(body: unknown) {
+    return this.requestJson('POST', '/v1/responses', body);
+  }
+
+  async getResponse(responseId: string) {
+    return this.getJson(`/v1/responses/${encodeURIComponent(responseId)}`);
+  }
+
+  async deleteResponse(responseId: string) {
+    return this.requestJson('DELETE', `/v1/responses/${encodeURIComponent(responseId)}`);
+  }
+
+  async getRun(runId: string) {
+    return this.getJson(`/v1/runs/${encodeURIComponent(runId)}`);
+  }
+
+  async stopRun(runId: string) {
+    return this.requestJson('POST', `/v1/runs/${encodeURIComponent(runId)}/stop`);
+  }
+
+  async listJobs() {
+    return this.getJson('/api/jobs');
+  }
+
+  async createJob(body: unknown) {
+    return this.requestJson('POST', '/api/jobs', body);
+  }
+
+  async getJob(jobId: string) {
+    return this.getJson(`/api/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  async updateJob(jobId: string, body: unknown) {
+    return this.requestJson('PATCH', `/api/jobs/${encodeURIComponent(jobId)}`, body);
+  }
+
+  async deleteJob(jobId: string) {
+    return this.requestJson('DELETE', `/api/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  async pauseJob(jobId: string) {
+    return this.requestJson('POST', `/api/jobs/${encodeURIComponent(jobId)}/pause`);
+  }
+
+  async resumeJob(jobId: string) {
+    return this.requestJson('POST', `/api/jobs/${encodeURIComponent(jobId)}/resume`);
+  }
+
+  async runJob(jobId: string) {
+    return this.requestJson('POST', `/api/jobs/${encodeURIComponent(jobId)}/run`);
+  }
+
   async runTask(input: HermesApiRunTaskInput): Promise<HermesApiRunTaskResult> {
     const start = await fetch(`${this.baseUrl}/v1/runs`, {
       method: 'POST',
@@ -55,6 +124,7 @@ export class FetchHermesApiClient implements HermesApiClient {
     if (!runId) {
       return { ok: false, output: '', error: 'Hermes API run response did not include run_id.', events: [] };
     }
+    input.onRunStarted?.(runId);
 
     return this.readRunEvents(runId);
   }
@@ -72,7 +142,7 @@ export class FetchHermesApiClient implements HermesApiClient {
         };
       }
       const text = await response.text();
-      return resultFromEvents(parseSseEvents(text));
+      return { ...resultFromEvents(parseSseEvents(text)), runId };
     } catch (error) {
       return {
         ok: false,
@@ -80,6 +150,24 @@ export class FetchHermesApiClient implements HermesApiClient {
         error: `Hermes API event stream failed at ${this.baseUrl}: ${messageFromUnknown(error)}`,
         events: [],
       };
+    }
+  }
+
+  private getJson(path: string) {
+    return this.requestJson('GET', path);
+  }
+
+  private async requestJson(method: HermesApiHttpMethod, path: string, body?: unknown): Promise<HermesEndpointResult<unknown>> {
+    try {
+      const response = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await response.text();
+      return endpointResultFromHttpResponse({ status: response.status, body: text });
+    } catch (error) {
+      return { ok: false, status: 0, error: `Hermes API request failed at ${this.baseUrl}${path}: ${messageFromUnknown(error)}` };
     }
   }
 }
@@ -98,6 +186,74 @@ export class NativeHermesApiClient implements HermesApiClient {
     } catch (error) {
       return { ok: false, message: `Hermes API health request failed at ${this.baseUrl}: ${messageFromUnknown(error)}` };
     }
+  }
+
+  async checkDetailedHealth() {
+    return this.getJson('/health/detailed');
+  }
+
+  async listModels() {
+    return this.getJson('/v1/models');
+  }
+
+  async getCapabilities() {
+    return this.getJson('/v1/capabilities');
+  }
+
+  async createChatCompletion(body: unknown) {
+    return this.requestJson('POST', '/v1/chat/completions', body);
+  }
+
+  async createResponse(body: unknown) {
+    return this.requestJson('POST', '/v1/responses', body);
+  }
+
+  async getResponse(responseId: string) {
+    return this.getJson(`/v1/responses/${encodeURIComponent(responseId)}`);
+  }
+
+  async deleteResponse(responseId: string) {
+    return this.requestJson('DELETE', `/v1/responses/${encodeURIComponent(responseId)}`);
+  }
+
+  async getRun(runId: string) {
+    return this.getJson(`/v1/runs/${encodeURIComponent(runId)}`);
+  }
+
+  async stopRun(runId: string) {
+    return this.requestJson('POST', `/v1/runs/${encodeURIComponent(runId)}/stop`);
+  }
+
+  async listJobs() {
+    return this.getJson('/api/jobs');
+  }
+
+  async createJob(body: unknown) {
+    return this.requestJson('POST', '/api/jobs', body);
+  }
+
+  async getJob(jobId: string) {
+    return this.getJson(`/api/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  async updateJob(jobId: string, body: unknown) {
+    return this.requestJson('PATCH', `/api/jobs/${encodeURIComponent(jobId)}`, body);
+  }
+
+  async deleteJob(jobId: string) {
+    return this.requestJson('DELETE', `/api/jobs/${encodeURIComponent(jobId)}`);
+  }
+
+  async pauseJob(jobId: string) {
+    return this.requestJson('POST', `/api/jobs/${encodeURIComponent(jobId)}/pause`);
+  }
+
+  async resumeJob(jobId: string) {
+    return this.requestJson('POST', `/api/jobs/${encodeURIComponent(jobId)}/resume`);
+  }
+
+  async runJob(jobId: string) {
+    return this.requestJson('POST', `/api/jobs/${encodeURIComponent(jobId)}/run`);
   }
 
   async runTask(input: HermesApiRunTaskInput): Promise<HermesApiRunTaskResult> {
@@ -120,6 +276,7 @@ export class NativeHermesApiClient implements HermesApiClient {
     if (!runId) {
       return { ok: false, output: '', error: 'Hermes API run response did not include run_id.', events: [] };
     }
+    input.onRunStarted?.(runId);
 
     return this.readRunEvents(runId);
   }
@@ -135,7 +292,7 @@ export class NativeHermesApiClient implements HermesApiClient {
           events: [],
         };
       }
-      return resultFromEvents(parseSseEvents(response.body));
+      return { ...resultFromEvents(parseSseEvents(response.body)), runId };
     } catch (error) {
       return {
         ok: false,
@@ -146,7 +303,20 @@ export class NativeHermesApiClient implements HermesApiClient {
     }
   }
 
-  private request(method: 'GET' | 'POST', url: string, body?: unknown) {
+  private getJson(path: string) {
+    return this.requestJson('GET', path);
+  }
+
+  private async requestJson(method: HermesApiHttpMethod, path: string, body?: unknown) {
+    try {
+      const response = await this.request(method, `${this.baseUrl}${path}`, body);
+      return endpointResultFromHttpResponse(response);
+    } catch (error) {
+      return { ok: false, status: 0, error: `Hermes API request failed at ${this.baseUrl}${path}: ${messageFromUnknown(error)}` };
+    }
+  }
+
+  private request(method: HermesApiHttpMethod, url: string, body?: unknown) {
     return this.invokeCommand<HermesApiHttpResponse>('hermes_api_request', body === undefined ? { method, url } : { method, url, body });
   }
 }
@@ -160,8 +330,10 @@ export async function createDefaultHermesApiClient(baseUrl: string): Promise<Her
   return new FetchHermesApiClient(baseUrl);
 }
 
-export function normalizeBaseUrl(baseUrl: string) {
-  return baseUrl.trim().replace(/\/+$/, '') || 'http://127.0.0.1:8642';
+export type HermesApiHttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+export function normalizeBaseUrl(baseUrl: string, fallback = 'http://127.0.0.1:8642') {
+  return baseUrl.trim().replace(/\/+$/, '') || fallback;
 }
 
 export function parseSseEvents(text: string): HermesApiRunEvent[] {
@@ -220,6 +392,19 @@ function parseJson(text: string) {
   } catch {
     return {};
   }
+}
+
+export function endpointResultFromHttpResponse(response: HermesApiHttpResponse): HermesEndpointResult<unknown> {
+  const data = parseJson(response.body);
+  if (response.status < 200 || response.status >= 300) {
+    return {
+      ok: false,
+      status: response.status,
+      data,
+      error: errorMessageFromBody(data, `Hermes API returned HTTP ${response.status}.`),
+    };
+  }
+  return { ok: true, status: response.status, data };
 }
 
 function healthFromHttpResponse(response: HermesApiHttpResponse, baseUrl: string): HermesHealth {

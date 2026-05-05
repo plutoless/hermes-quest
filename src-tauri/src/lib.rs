@@ -16,19 +16,24 @@ async fn hermes_api_request(
     method: String,
     url: String,
     body: Option<Value>,
+    headers: Option<std::collections::HashMap<String, String>>,
 ) -> Result<HermesApiResponse, String> {
     let client = reqwest::Client::new();
     let method = method.trim().to_uppercase();
     let builder = match method.as_str() {
         "GET" => client.get(&url),
-        "POST" => {
-            let builder = client.post(&url);
-            match body {
-                Some(body) => builder.json(&body),
-                None => builder,
-            }
-        }
+        "POST" => with_optional_json(client.post(&url), body),
+        "PUT" => with_optional_json(client.put(&url), body),
+        "PATCH" => with_optional_json(client.patch(&url), body),
+        "DELETE" => with_optional_json(client.delete(&url), body),
         _ => return Err(format!("Unsupported Hermes API method: {method}")),
+    };
+
+    let builder = match headers {
+        Some(headers) => headers.into_iter().fold(builder, |request, (name, value)| {
+            request.header(name, value)
+        }),
+        None => builder,
     };
 
     let response = builder
@@ -42,6 +47,16 @@ async fn hermes_api_request(
         .map_err(|error| format!("Hermes API response read failed: {error}"))?;
 
     Ok(HermesApiResponse { status, body })
+}
+
+fn with_optional_json(
+    builder: reqwest::RequestBuilder,
+    body: Option<Value>,
+) -> reqwest::RequestBuilder {
+    match body {
+        Some(body) => builder.json(&body),
+        None => builder,
+    }
 }
 
 fn show_hall(app: &AppHandle) -> Result<(), String> {

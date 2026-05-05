@@ -223,6 +223,30 @@ function getExecutionSource(status: SystemStatus) {
   return 'Mock bridge';
 }
 
+function getProfileSource(status: SystemStatus, agent?: Agent) {
+  if (status.activeImplementation === 'real') {
+    return agent?.name === 'Profile unavailable' ? 'Profile metadata unavailable' : 'Gateway REST metadata';
+  }
+  if (status.activeImplementation === 'loading') return 'Bridge loading';
+  return status.bridgeMode === 'auto' ? 'Mock fallback roles' : 'Mock role presets';
+}
+
+export function getOperationalStatusRows(status: SystemStatus) {
+  const rows = [
+    { label: 'Sessions', value: status.operationalData?.sessionsSummary, source: status.dataSources?.sessions },
+    { label: 'Session messages', value: status.operationalData?.sessionMessagesSummary, source: status.dataSources?.sessionMessages },
+    { label: 'Logs', value: status.operationalData?.logsSummary, source: status.dataSources?.logs },
+    { label: 'Analytics', value: status.operationalData?.analyticsSummary, source: status.dataSources?.analytics },
+    { label: 'Cron', value: status.operationalData?.cronSummary, source: status.dataSources?.cronJobs },
+    { label: 'Config', value: status.operationalData?.configSummary, source: status.dataSources?.config },
+    { label: 'Env', value: status.operationalData?.envSummary, source: status.dataSources?.env },
+    { label: 'Gateway jobs', value: status.operationalData?.gatewayJobsSummary, source: status.dataSources?.gatewayJobs },
+  ];
+  return rows
+    .filter((row) => Boolean(row.value && row.source && row.source !== 'unavailable'))
+    .map((row) => ({ label: row.label, value: row.value ?? '', source: row.source ?? 'unavailable' }));
+}
+
 function App() {
   const { snapshot, lastEvent, bridge, bridgeReady, bridgeConfig, applyBridgeConfig } = useBridgeSnapshot();
   const [activeView, setActiveView] = useState<MainView>(getInitialView);
@@ -325,6 +349,10 @@ function App() {
     setBoardDefinitionOfDone('');
   }
 
+  async function stopQuest(taskId: string) {
+    await bridge.stopTask?.(taskId);
+  }
+
   const openHall = async () => {
     await openMainView('hall');
   };
@@ -389,6 +417,7 @@ function App() {
           commandValue={petInput}
           onCommandValue={setPetInput}
           onCreateQuest={createPetQuest}
+          onStopTask={stopQuest}
         />
       </div>
     );
@@ -441,6 +470,7 @@ function App() {
             onBoardAssignee={setBoardAssignee}
             onCreateQuest={createBoardQuest}
             onSelectTask={setSelectedTaskId}
+            onStopTask={stopQuest}
             bridgeReady={bridgeReady}
           />
         )}
@@ -515,6 +545,7 @@ function BridgeStatusDetails({ status, config, bridgeReady, onConfigChange, onAp
       ? 'Mock fallback'
       : 'Fallback active'
     : getExecutionSource(status);
+  const operationalRows = getOperationalStatusRows(status);
 
   return (
     <details className="pixel-bridge-status">
@@ -534,10 +565,38 @@ function BridgeStatusDetails({ status, config, bridgeReady, onConfigChange, onAp
             <option value="real">real</option>
           </PixelSelect>
         </label>
+        <label>
+          Gateway REST
+          <PixelInput
+            value={config.hermesApiBaseUrl}
+            onChange={(hermesApiBaseUrl) => onConfigChange({ ...config, hermesApiBaseUrl })}
+            ariaLabel="Hermes gateway base URL"
+          />
+        </label>
+        <label>
+          Dashboard compatibility
+          <PixelInput
+            value={config.hermesDashboardBaseUrl}
+            onChange={(hermesDashboardBaseUrl) => onConfigChange({ ...config, hermesDashboardBaseUrl })}
+            ariaLabel="Hermes dashboard compatibility base URL"
+          />
+        </label>
         <PixelButton type="button" tone="ghost" onClick={onApply} disabled={!bridgeReady}>
           Save
         </PixelButton>
         <PixelBadge status={status.activeImplementation}>Hermes {status.hermesAvailable}</PixelBadge>
+        <PixelBadge status={status.dashboardAvailable === 'available' ? 'real' : 'mock'}>Dashboard {status.dashboardAvailable ?? 'unchecked'}</PixelBadge>
+        {operationalRows.length > 0 && (
+          <div className="pixel-operational-status" aria-label="Hermes operational data">
+            {operationalRows.map((row) => (
+              <span key={row.label}>
+                <strong>{row.label}</strong>
+                {row.value}
+                <em>{row.source}</em>
+              </span>
+            ))}
+          </div>
+        )}
       </div>
     </details>
   );
@@ -933,6 +992,7 @@ interface GuildHallProps {
   commandValue: string;
   onCommandValue: (value: string) => void;
   onCreateQuest: () => void;
+  onStopTask: (taskId: string) => void | Promise<void>;
   bridgeReady: boolean;
 }
 
@@ -957,6 +1017,7 @@ function GuildHall({
   commandValue,
   onCommandValue,
   onCreateQuest,
+  onStopTask,
   bridgeReady,
 }: GuildHallProps) {
   const latestReport = pendingReports[0];
@@ -1006,8 +1067,11 @@ function GuildHall({
       : 'Fallback active'
     : getExecutionSource(systemStatus);
   const bridgeHealthLabel = `Hermes ${systemStatus.hermesAvailable}`;
+  const operationalRows = getOperationalStatusRows(systemStatus);
   const suggestedPrompts = ['Prepare a demo brief', 'Summarize recent notes', 'Review returned quests'];
   const updateBridgeMode = (bridgeMode: BridgeMode) => onBridgeConfigChange({ ...bridgeConfig, bridgeMode });
+  const updateGatewayBaseUrl = (hermesApiBaseUrl: string) => onBridgeConfigChange({ ...bridgeConfig, hermesApiBaseUrl });
+  const updateDashboardBaseUrl = (hermesDashboardBaseUrl: string) => onBridgeConfigChange({ ...bridgeConfig, hermesDashboardBaseUrl });
 
   return (
     <PixelAppWindow
@@ -1028,10 +1092,32 @@ function GuildHall({
                 <option value="real">real</option>
               </PixelSelect>
             </label>
+            <label>
+              Gateway REST
+              <PixelInput value={bridgeConfig.hermesApiBaseUrl} onChange={updateGatewayBaseUrl} ariaLabel="Hermes gateway base URL" />
+            </label>
+            <label>
+              Dashboard compatibility
+              <PixelInput value={bridgeConfig.hermesDashboardBaseUrl} onChange={updateDashboardBaseUrl} ariaLabel="Hermes dashboard compatibility base URL" />
+            </label>
             <PixelButton type="button" tone="ghost" onClick={onApplyBridgeConfig} disabled={!bridgeReady}>
               Save
             </PixelButton>
             <PixelBadge status={systemStatus.activeImplementation}>{bridgeHealthLabel}</PixelBadge>
+            <PixelBadge status={systemStatus.dashboardAvailable === 'available' ? 'real' : 'mock'}>
+              Dashboard {systemStatus.dashboardAvailable ?? 'unchecked'}
+            </PixelBadge>
+            {operationalRows.length > 0 && (
+              <div className="pixel-operational-status" aria-label="Hermes operational data">
+                {operationalRows.map((row) => (
+                  <span key={row.label}>
+                    <strong>{row.label}</strong>
+                    {row.value}
+                    <em>{row.source}</em>
+                  </span>
+                ))}
+              </div>
+            )}
           </div>
         </details>
       }
@@ -1137,9 +1223,16 @@ function GuildHall({
           onSuggestionSelect={onCommandValue}
           action={
             activeQuest ? (
-              <PixelButton onClick={() => onOpenTask(activeQuest.id)}>
-                <PixelIcon name="quest-log" size={18} /> Open Quest Log
-              </PixelButton>
+              <div className="pixel-review-actions">
+                <PixelButton onClick={() => onOpenTask(activeQuest.id)}>
+                  <PixelIcon name="quest-log" size={18} /> Open Quest Log
+                </PixelButton>
+                {activeQuest.state === 'running' && (
+                  <PixelButton tone="danger" onClick={() => onStopTask(activeQuest.id)}>
+                    Stop Run
+                  </PixelButton>
+                )}
+              </div>
             ) : (
               <PixelButton tone="secondary" onClick={onOpenReview}>
                 <PixelIcon name="review" size={18} /> Review Returned Quests
@@ -1190,7 +1283,7 @@ function GuildHall({
           execution={getExecutionSource(systemStatus)}
           hermes={systemStatus.hermesAvailable}
           fallback={systemStatus.fallbackReason}
-          profileSource="Guild-defined roles"
+          profileSource={getProfileSource(systemStatus, activeAgent)}
         />
       </section>
     </PixelAppWindow>
@@ -1246,6 +1339,7 @@ interface QuestBoardProps {
   onBoardAssignee: (value: string) => void;
   onCreateQuest: () => void;
   onSelectTask: (taskId: string) => void;
+  onStopTask: (taskId: string) => void | Promise<void>;
   bridgeReady: boolean;
 }
 
@@ -1268,6 +1362,7 @@ function QuestBoard({
   onBoardAssignee,
   onCreateQuest,
   onSelectTask,
+  onStopTask,
   bridgeReady,
 }: QuestBoardProps) {
   return (
@@ -1344,7 +1439,12 @@ function QuestBoard({
         )}
       </PixelPanel>
 
-      <TaskDetail task={selectedTask} agent={agents.find((agent) => agent.id === selectedTask?.assigneeId)} systemStatus={systemStatus} />
+      <TaskDetail
+        task={selectedTask}
+        agent={agents.find((agent) => agent.id === selectedTask?.assigneeId)}
+        systemStatus={systemStatus}
+        onStopTask={onStopTask}
+      />
 
       <PixelTruthStrip
         mode={systemStatus.bridgeMode}
@@ -1352,13 +1452,23 @@ function QuestBoard({
         execution={getExecutionSource(systemStatus)}
         hermes={systemStatus.hermesAvailable}
         fallback={systemStatus.fallbackReason}
-        profileSource="Guild-defined roles"
+        profileSource={getProfileSource(systemStatus, agents.find((agent) => agent.activeInPet))}
       />
     </section>
   );
 }
 
-function TaskDetail({ task, agent, systemStatus }: { task?: Task; agent?: Agent; systemStatus: SystemStatus }) {
+function TaskDetail({
+  task,
+  agent,
+  systemStatus,
+  onStopTask,
+}: {
+  task?: Task;
+  agent?: Agent;
+  systemStatus: SystemStatus;
+  onStopTask?: (taskId: string) => void | Promise<void>;
+}) {
   if (!task) {
     return (
       <PixelPanel className="quest-detail-panel empty">
@@ -1392,8 +1502,16 @@ function TaskDetail({ task, agent, systemStatus }: { task?: Task; agent?: Agent;
         <span>Assignee: {agent ? `${agent.name} / ${agent.role}` : task.assigneeId}</span>
         <span>Review: {task.reviewStatus.replaceAll('_', ' ')}</span>
         <span>Execution: {getExecutionSource(systemStatus)}</span>
-        <span>Profile data: Guild-defined role</span>
+        <span>Profile data: {getProfileSource(systemStatus, agent)}</span>
+        <span>Run id: {task.hermesRunId ?? 'unavailable'}</span>
       </div>
+      {task.state === 'running' && (
+        <div className="detail-actions">
+          <PixelButton tone="danger" onClick={() => onStopTask?.(task.id)} disabled={!onStopTask}>
+            Stop Gateway Run
+          </PixelButton>
+        </div>
+      )}
       {(task.goals || task.nonGoals || task.context || task.definitionOfDone) && (
         <div className="brief-notes">
           {task.goals && (
@@ -1717,7 +1835,7 @@ function PixelShowcase() {
             execution="Mock fallback"
             hermes="unavailable"
             fallback="Hermes API health request failed"
-            profileSource="Guild-defined roles"
+            profileSource="Mock fallback roles"
           />
         </div>
       </PixelAppWindow>

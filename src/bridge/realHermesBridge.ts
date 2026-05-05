@@ -7,6 +7,7 @@ import type {
   CreateTaskInput,
   PetPosition,
   ReportCard,
+  Skill,
   Task,
   TimelineEvent,
 } from '../types';
@@ -89,16 +90,36 @@ const seedSnapshot = (config: BridgeConfig): BridgeSnapshot => ({
   activeProfileId: 'builder',
   tasks: [],
   reports: [],
-  systemStatus: {
-    gatewayStatus: 'connected',
-    providerHealth: 'healthy',
-    bridgeMode: config.bridgeMode,
-    activeImplementation: 'real',
-    hermesAvailable: 'unchecked',
-    hermesApiBaseUrl: config.hermesApiBaseUrl,
-    logsSummary: `Bridge mode: real. Hermes API base URL: ${config.hermesApiBaseUrl}.`,
-    warnings: ['Real bridge uses Hermes API /v1/runs. Profile mapping is not sent because the API does not expose a profile parameter.'],
-  },
+    systemStatus: {
+      gatewayStatus: 'connected',
+      providerHealth: 'healthy',
+      bridgeMode: config.bridgeMode,
+      activeImplementation: 'real',
+      hermesAvailable: 'unchecked',
+      hermesApiBaseUrl: config.hermesApiBaseUrl,
+      hermesDashboardBaseUrl: config.hermesDashboardBaseUrl,
+      dashboardAvailable: 'unchecked',
+      dataSources: {
+        gateway: 'gateway-rest',
+        gatewayJobs: 'unavailable',
+        profiles: 'gateway-rest',
+        tasks: 'gateway-rest',
+        detailedHealth: 'unavailable',
+        models: 'unavailable',
+        capabilities: 'unavailable',
+        review: 'guild-owned',
+        sessions: 'unavailable',
+        logs: 'unavailable',
+        analytics: 'unavailable',
+        skills: 'unavailable',
+        toolsets: 'unavailable',
+        config: 'unavailable',
+        env: 'unavailable',
+        cronJobs: 'unavailable',
+      },
+      logsSummary: `Bridge mode: real. Hermes API base URL: ${config.hermesApiBaseUrl}. Dashboard compatibility base URL: ${config.hermesDashboardBaseUrl}.`,
+      warnings: ['Real bridge uses Hermes API /v1/runs. Profile mapping is not sent because the API does not expose a profile parameter.'],
+    },
   petPosition: { x: 32, y: 32 },
 });
 
@@ -172,6 +193,128 @@ export class RealHermesBridge implements HermesBridgeApi {
     this.snapshot.systemStatus = {
       ...this.snapshot.systemStatus,
       ...patch,
+    };
+  }
+
+  applyDashboardInventory(input: { skills?: unknown; toolsets?: unknown }) {
+    const skills = skillsFromDashboard(input.skills);
+    const toolsets = toolsetsFromDashboard(input.toolsets);
+    this.snapshot.agents = this.snapshot.agents.map((agent) =>
+      agent.id === this.snapshot.activeProfileId
+        ? {
+            ...agent,
+            skills,
+            equipment: [...agent.equipment.filter((item) => !item.startsWith('Toolset: ')), ...toolsets],
+          }
+        : agent,
+    );
+  }
+
+  applyGatewayMetadata(input: { detailedHealth?: unknown; models?: unknown; capabilities?: unknown }) {
+    const models = modelsFromGateway(input.models);
+    const capabilities = capabilitiesFromGateway(input.capabilities);
+    const extraEquipment = [
+      ...models.map((model) => `Model: ${model}`),
+      ...capabilities.map((capability) => `Capability: ${capability}`),
+    ];
+    this.snapshot.agents = this.snapshot.agents.map((agent) =>
+      agent.id === this.snapshot.activeProfileId
+        ? {
+            ...agent,
+            equipment: [
+              ...agent.equipment.filter((item) => !item.startsWith('Model: ') && !item.startsWith('Capability: ')),
+              ...extraEquipment,
+            ],
+          }
+        : agent,
+    );
+    this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
+      providerHealth: input.detailedHealth ? 'healthy' : this.snapshot.systemStatus.providerHealth,
+      dataSources: {
+        ...this.snapshot.systemStatus.dataSources,
+        detailedHealth: input.detailedHealth ? 'gateway-rest' : 'unavailable',
+        models: input.models ? 'gateway-rest' : 'unavailable',
+        capabilities: input.capabilities ? 'gateway-rest' : 'unavailable',
+      },
+    };
+  }
+
+  applyOperationalData(input: {
+    sessions?: unknown;
+    session?: unknown;
+    sessionMessages?: unknown;
+    sessionMessagesSessionId?: string;
+    logs?: unknown;
+    analytics?: unknown;
+    cronJobs?: unknown;
+    config?: unknown;
+    configDefaults?: unknown;
+    configSchema?: unknown;
+    env?: unknown;
+    gatewayJobs?: unknown;
+  }) {
+    const operationalData = {
+      ...this.snapshot.systemStatus.operationalData,
+      sessionsSummary: input.sessions
+        ? countSummary(collectionFromPayload(input.sessions, ['sessions', 'items', 'data']), 'dashboard compatibility session')
+        : this.snapshot.systemStatus.operationalData?.sessionsSummary,
+      sessionMessagesSummary: input.sessionMessages
+        ? `${collectionFromPayload(input.sessionMessages, ['messages', 'items', 'data']).length} messages in session ${input.sessionMessagesSessionId ?? 'unknown'}`
+        : this.snapshot.systemStatus.operationalData?.sessionMessagesSummary,
+      logsSummary: input.logs ? logsSummary(input.logs) : this.snapshot.systemStatus.operationalData?.logsSummary,
+      analyticsSummary: input.analytics ? analyticsSummary(input.analytics) : this.snapshot.systemStatus.operationalData?.analyticsSummary,
+      cronSummary: input.cronJobs
+        ? countSummary(collectionFromPayload(input.cronJobs, ['jobs', 'cron_jobs', 'items', 'data']), 'cron job')
+        : this.snapshot.systemStatus.operationalData?.cronSummary,
+      configSummary: configSummary(input.config, input.configDefaults, input.configSchema) ?? this.snapshot.systemStatus.operationalData?.configSummary,
+      envSummary: input.env ? envSummary(input.env) : this.snapshot.systemStatus.operationalData?.envSummary,
+      gatewayJobsSummary: input.gatewayJobs
+        ? countSummary(collectionFromPayload(input.gatewayJobs, ['jobs', 'items', 'data']), 'gateway job')
+        : this.snapshot.systemStatus.operationalData?.gatewayJobsSummary,
+    };
+    this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
+      operationalData,
+      dataSources: {
+        ...this.snapshot.systemStatus.dataSources,
+        sessions: input.sessions ? 'dashboard-compatibility' : this.snapshot.systemStatus.dataSources?.sessions ?? 'unavailable',
+        sessionMessages: input.session || input.sessionMessages
+          ? 'dashboard-compatibility'
+          : this.snapshot.systemStatus.dataSources?.sessionMessages ?? 'unavailable',
+        logs: input.logs ? 'dashboard-compatibility' : this.snapshot.systemStatus.dataSources?.logs ?? 'unavailable',
+        analytics: input.analytics ? 'dashboard-compatibility' : this.snapshot.systemStatus.dataSources?.analytics ?? 'unavailable',
+        cronJobs: input.cronJobs ? 'dashboard-compatibility' : this.snapshot.systemStatus.dataSources?.cronJobs ?? 'unavailable',
+        config: input.config || input.configDefaults || input.configSchema
+          ? 'dashboard-compatibility'
+          : this.snapshot.systemStatus.dataSources?.config ?? 'unavailable',
+        env: input.env ? 'dashboard-compatibility' : this.snapshot.systemStatus.dataSources?.env ?? 'unavailable',
+        gatewayJobs: input.gatewayJobs ? 'gateway-rest' : this.snapshot.systemStatus.dataSources?.gatewayJobs ?? 'unavailable',
+      },
+    };
+  }
+
+  markDashboardCompatibilityProtected() {
+    this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
+      dataSources: {
+        ...this.snapshot.systemStatus.dataSources,
+        sessions: 'unavailable',
+        sessionMessages: 'unavailable',
+        logs: 'unavailable',
+        analytics: 'unavailable',
+        skills: 'unavailable',
+        toolsets: 'unavailable',
+        config: 'unavailable',
+        env: 'unavailable',
+        cronJobs: 'unavailable',
+      },
+      warnings: [
+        'Hermes dashboard protected REST skipped: session token unavailable.',
+        ...this.snapshot.systemStatus.warnings.filter(
+          (warning) => warning !== 'Hermes dashboard protected REST skipped: session token unavailable.',
+        ),
+      ],
     };
   }
 
@@ -278,6 +421,58 @@ export class RealHermesBridge implements HermesBridgeApi {
     return this.snapshot.tasks.find((task) => !before.has(task.id))?.id;
   }
 
+  async stopTask(taskId: string) {
+    const task = this.snapshot.tasks.find((item) => item.id === taskId);
+    if (!task || task.state !== 'running') return false;
+    if (!task.hermesRunId) {
+      this.snapshot.systemStatus = {
+        ...this.snapshot.systemStatus,
+        warnings: [
+          'Stop unavailable: Hermes run id is not known for this task.',
+          ...this.snapshot.systemStatus.warnings.filter((warning) => warning !== 'Stop unavailable: Hermes run id is not known for this task.'),
+        ],
+      };
+      return false;
+    }
+    if (!this.apiClient.stopRun) {
+      this.snapshot.systemStatus = {
+        ...this.snapshot.systemStatus,
+        warnings: [
+          'Stop unavailable: Hermes gateway client does not expose stopRun.',
+          ...this.snapshot.systemStatus.warnings.filter((warning) => warning !== 'Stop unavailable: Hermes gateway client does not expose stopRun.'),
+        ],
+      };
+      return false;
+    }
+    const result = await this.apiClient.stopRun(task.hermesRunId);
+    if (!result.ok) {
+      this.snapshot.systemStatus = {
+        ...this.snapshot.systemStatus,
+        warnings: [`Stop unavailable: ${result.error ?? `Hermes gateway returned HTTP ${result.status}`}`],
+      };
+      return false;
+    }
+    const stopped = this.findTask(taskId);
+    this.updateTask(taskId, {
+      state: 'blocked',
+      reviewStatus: 'none',
+      timeline: [...stopped.timeline, this.timeline(taskId, task.assigneeId, 'blocked', 'Hermes gateway run stopped by the user.', 'guild')],
+    });
+    this.snapshot.agents = this.snapshot.agents.map((agent) =>
+      agent.id === task.assigneeId ? { ...agent, status: 'blocked', availability: 'available', currentTaskId: undefined } : agent,
+    );
+    this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
+      logsSummary: `Hermes gateway run ${task.hermesRunId} stopped by user action.`,
+      dataSources: {
+        ...this.snapshot.systemStatus.dataSources,
+        runStop: 'gateway-rest',
+      },
+    };
+    this.emit(makeEvent('task_blocked', task.assigneeId, task.id, { hermesRunId: task.hermesRunId }));
+    return true;
+  }
+
   simulateBlocked(taskId?: string) {
     const task = taskId ? this.findTask(taskId) : this.snapshot.tasks[0];
     const agentId = task?.assigneeId ?? this.snapshot.activeProfileId;
@@ -360,7 +555,12 @@ export class RealHermesBridge implements HermesBridgeApi {
       input: this.promptForTask(task),
       instructions: 'Return a concise final answer suitable for a Quest Report Card.',
       sessionId: task.id,
+      onRunStarted: (runId) => {
+        this.updateTask(task.id, { hermesRunId: runId });
+      },
     });
+
+    if (this.findTask(task.id).state === 'blocked') return;
 
     if (!result.ok) {
       this.failTask(this.findTask(task.id), result.error || result.output || 'Hermes API run failed.');
@@ -368,7 +568,36 @@ export class RealHermesBridge implements HermesBridgeApi {
     }
 
     this.recordRunEvents(task.id, result.events);
+    await this.recordRunStatus(task.id, result.runId ?? this.findTask(task.id).hermesRunId);
     this.completeTask(this.findTask(task.id), result.output.trim() || '(Hermes API returned no output.)');
+  }
+
+  private async recordRunStatus(taskId: string, runId: string | undefined) {
+    if (!runId || !this.apiClient.getRun) return;
+    const result = await this.apiClient.getRun(runId);
+    if (!result.ok) {
+      this.snapshot.systemStatus = {
+        ...this.snapshot.systemStatus,
+        dataSources: {
+          ...this.snapshot.systemStatus.dataSources,
+          runStatus: 'unavailable',
+        },
+      };
+      return;
+    }
+    const status = runStatusFromPayload(result.data);
+    if (!status) return;
+    const task = this.findTask(taskId);
+    this.updateTask(taskId, {
+      timeline: [...task.timeline, this.timeline(taskId, task.assigneeId, 'progress', `Gateway run status: ${status}.`, 'bridge')],
+    });
+    this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
+      dataSources: {
+        ...this.snapshot.systemStatus.dataSources,
+        runStatus: 'gateway-rest',
+      },
+    };
   }
 
   private completeTask(task: Task, finalOutput: string) {
@@ -392,12 +621,14 @@ export class RealHermesBridge implements HermesBridgeApi {
         : agent,
     );
     this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
       gatewayStatus: 'connected',
       providerHealth: 'healthy',
       bridgeMode: this.snapshot.systemStatus.bridgeMode,
       activeImplementation: 'real',
       hermesAvailable: this.snapshot.systemStatus.hermesAvailable,
       hermesApiBaseUrl: this.config.hermesApiBaseUrl,
+      hermesDashboardBaseUrl: this.config.hermesDashboardBaseUrl,
       logsSummary: `Bridge mode: real. Hermes API output returned for ${this.agentName(task.assigneeId)}.`,
       warnings: this.snapshot.systemStatus.warnings,
     };
@@ -419,12 +650,14 @@ export class RealHermesBridge implements HermesBridgeApi {
       agent.id === agentId ? { ...agent, status: 'error', availability: 'available', currentTaskId: task?.id ?? agent.currentTaskId } : agent,
     );
     this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
       gatewayStatus: 'error',
       providerHealth: 'degraded',
       bridgeMode: this.snapshot.systemStatus.bridgeMode,
       activeImplementation: 'real',
       hermesAvailable: this.snapshot.systemStatus.hermesAvailable,
       hermesApiBaseUrl: this.config.hermesApiBaseUrl,
+      hermesDashboardBaseUrl: this.config.hermesDashboardBaseUrl,
       logsSummary: `Bridge mode: real. Hermes failure: ${message}`,
       warnings: ['Real Hermes failure surfaced from the Hermes API response or event stream.'],
     };
@@ -558,4 +791,150 @@ export class RealHermesBridge implements HermesBridgeApi {
     const snapshot = this.getSnapshot();
     this.listeners.forEach((listener) => listener(snapshot, event));
   }
+}
+
+function skillsFromDashboard(payload: unknown): Skill[] {
+  return collectionFromPayload(payload, ['skills', 'items', 'data'])
+    .map((item) => {
+      if (!item || typeof item !== 'object') return undefined;
+      const candidate = item as Record<string, unknown>;
+      const name = stringField(candidate.name) || stringField(candidate.id);
+      if (!name) return undefined;
+      return {
+        id: stringField(candidate.id) || slugFromName(name),
+        name,
+        category: stringField(candidate.category) || stringField(candidate.type) || 'dashboard',
+        description: stringField(candidate.description) || stringField(candidate.summary) || 'Hermes dashboard skill.',
+        trigger: stringField(candidate.trigger) || stringField(candidate.command) || name,
+        enabled: typeof candidate.enabled === 'boolean' ? candidate.enabled : true,
+      };
+    })
+    .filter((skill): skill is Skill => Boolean(skill));
+}
+
+function toolsetsFromDashboard(payload: unknown): string[] {
+  return collectionFromPayload(payload, ['toolsets', 'items', 'data'])
+    .map((item) => {
+      if (typeof item === 'string') return `Toolset: ${item}`;
+      if (!item || typeof item !== 'object') return undefined;
+      const candidate = item as Record<string, unknown>;
+      if (candidate.enabled === false) return undefined;
+      const name = stringField(candidate.name) || stringField(candidate.id);
+      return name ? `Toolset: ${name}` : undefined;
+    })
+    .filter((item): item is string => Boolean(item));
+}
+
+function modelsFromGateway(payload: unknown): string[] {
+  return collectionFromPayload(payload, ['data', 'models', 'items'])
+    .map((item) => {
+      if (typeof item === 'string') return item;
+      if (!item || typeof item !== 'object') return undefined;
+      const candidate = item as Record<string, unknown>;
+      return stringField(candidate.id) || stringField(candidate.name);
+    })
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 4);
+}
+
+function capabilitiesFromGateway(payload: unknown): string[] {
+  if (Array.isArray(payload)) {
+    return payload.map(stringField).filter(Boolean).slice(0, 6);
+  }
+  if (!payload || typeof payload !== 'object') return [];
+  const candidate = payload as Record<string, unknown>;
+  const collection = collectionFromPayload(payload, ['capabilities', 'data', 'items']);
+  if (collection.length > 0) {
+    return collection
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        if (!item || typeof item !== 'object') return undefined;
+        const capability = item as Record<string, unknown>;
+        return stringField(capability.id) || stringField(capability.name);
+      })
+      .filter((item): item is string => Boolean(item))
+      .slice(0, 6);
+  }
+  return Object.entries(candidate)
+    .filter(([, value]) => value === true)
+    .map(([key]) => key)
+    .slice(0, 6);
+}
+
+function countSummary(items: unknown[], singular: string) {
+  const count = items.length;
+  return `${count} ${singular}${count === 1 ? '' : 's'}`;
+}
+
+function logsSummary(payload: unknown) {
+  const logs = collectionFromPayload(payload, ['logs', 'items', 'data']);
+  const warningCount = logs.filter((item) => {
+    if (!item || typeof item !== 'object') return false;
+    const level = stringField((item as Record<string, unknown>).level).toLowerCase();
+    return level === 'warning' || level === 'warn' || level === 'error';
+  }).length;
+  return `${logs.length} log entries, ${warningCount} warning/error${warningCount === 1 ? '' : 's'}`;
+}
+
+function analyticsSummary(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return 'analytics available';
+  const candidate = payload as Record<string, unknown>;
+  const requests = numberField(candidate.requests) ?? numberField(candidate.request_count) ?? numberField(candidate.total_requests);
+  const tokens = numberField(candidate.tokens) ?? numberField(candidate.total_tokens);
+  if (requests !== undefined && tokens !== undefined) return `${requests} requests, ${tokens} tokens`;
+  if (requests !== undefined) return `${requests} requests`;
+  if (tokens !== undefined) return `${tokens} tokens`;
+  return 'analytics available';
+}
+
+function configSummary(config: unknown, defaults: unknown, schema: unknown) {
+  const parts = [
+    config ? 'config' : undefined,
+    defaults ? 'defaults' : undefined,
+    schema ? 'schema' : undefined,
+  ].filter(Boolean);
+  return parts.length > 0 ? `${parts.join(', ')} available` : undefined;
+}
+
+function envSummary(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return 'env status available';
+  const candidate = payload as Record<string, unknown>;
+  const configured = Object.entries(candidate).filter(([, value]) => {
+    if (typeof value === 'string') return value.trim().length > 0;
+    if (!value || typeof value !== 'object') return Boolean(value);
+    const metadata = value as Record<string, unknown>;
+    if (typeof metadata.set === 'boolean') return metadata.set;
+    if (typeof metadata.configured === 'boolean') return metadata.configured;
+    if (typeof metadata.exists === 'boolean') return metadata.exists;
+    return Boolean(metadata.redacted || metadata.value);
+  }).length;
+  return `${configured} env key${configured === 1 ? '' : 's'} configured`;
+}
+
+function numberField(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+function runStatusFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const candidate = payload as Record<string, unknown>;
+  return stringField(candidate.status) || stringField(candidate.state);
+}
+
+function collectionFromPayload(payload: unknown, keys: string[]) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+  const candidate = payload as Record<string, unknown>;
+  for (const key of keys) {
+    if (Array.isArray(candidate[key])) return candidate[key] as unknown[];
+  }
+  return [];
+}
+
+function stringField(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function slugFromName(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'dashboard-skill';
 }

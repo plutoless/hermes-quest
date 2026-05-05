@@ -77,6 +77,7 @@ export interface Task {
   reviewStatus: ReviewStatus;
   error?: string;
   revisionOfTaskId?: string;
+  hermesRunId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -99,13 +100,29 @@ export interface ReportCard {
 export interface SystemStatus {
   gatewayStatus: 'mocked' | 'connected' | 'error';
   providerHealth: 'mocked' | 'healthy' | 'degraded';
+  dashboardAvailable?: 'available' | 'unavailable' | 'unchecked';
   bridgeMode: 'mock' | 'real' | 'auto';
   activeImplementation: 'mock' | 'real' | 'loading';
   hermesAvailable: 'available' | 'unavailable' | 'unchecked';
   fallbackReason?: string;
   hermesApiBaseUrl?: string;
+  hermesDashboardBaseUrl?: string;
   logsSummary: string;
   warnings: string[];
+  dataSources?: Record<
+    string,
+    'gateway-rest' | 'local-hermes-state' | 'dashboard-compatibility' | 'guild-owned' | 'mock-fallback' | 'unavailable' | 'cli-pty'
+  >;
+  operationalData?: {
+    sessionsSummary?: string;
+    sessionMessagesSummary?: string;
+    logsSummary?: string;
+    analyticsSummary?: string;
+    cronSummary?: string;
+    configSummary?: string;
+    envSummary?: string;
+    gatewayJobsSummary?: string;
+  };
 }
 
 export interface PetPosition {

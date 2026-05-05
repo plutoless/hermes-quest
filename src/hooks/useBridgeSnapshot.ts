@@ -59,6 +59,7 @@ const loadingSnapshot: BridgeSnapshot = {
     bridgeMode: 'auto',
     activeImplementation: 'loading',
     hermesAvailable: 'unchecked',
+    dashboardAvailable: 'unchecked',
     logsSummary: 'Bridge selection is loading. Task submission is disabled until mock, real, or auto mode is active.',
     warnings: ['Bridge not ready yet.'],
   },

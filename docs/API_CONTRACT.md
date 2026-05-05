@@ -1,6 +1,6 @@
 # Hermes Guild v0 API Contract
 
-This contract defines the first mock Hermes Bridge surface. UI components should depend on these game-readable objects instead of Hermes runtime internals.
+This contract defines the Hermes Bridge surface. UI components should depend on these game-readable objects instead of Hermes runtime internals.
 
 ## Domain Types
 
@@ -38,6 +38,7 @@ This contract defines the first mock Hermes Bridge surface. UI components should
 - `reviewStatus`: `none`, `required`, `approved`, or `revision_requested`.
 - `error`: optional visible error summary.
 - `revisionOfTaskId`: original task id when this task is a revision rerun.
+- `hermesRunId`: Hermes gateway run id when `/v1/runs` has returned one.
 
 ### TimelineEvent
 
@@ -104,6 +105,77 @@ Pet Mode should not show app-authored greeting, sending, accepted, report-ready,
 - `simulateBlocked(taskId?)`: v0 mock-only helper to surface pet and task blocked states.
 - `simulateError(taskId?)`: v0 mock-only helper to surface pet and task error states.
 - `setPetPosition(position)`: persists or mocks pet position.
+- `stopTask(taskId)`: explicit user action for running real gateway tasks. Calls `POST /v1/runs/{run_id}/stop` only when a `hermesRunId` is known; otherwise records a visible unavailable warning.
+
+## Source Boundaries
+
+Bridge surfaces must be labeled with one of these source classes:
+
+- Gateway REST: Hermes API server, default `http://127.0.0.1:8642`.
+- Local Hermes state: Guild/Tauri bridge reads of the same local Hermes files/runtime state the official dashboard backend reads.
+- Dashboard compatibility: optional Hermes dashboard backend calls, default `http://127.0.0.1:9119`; protected calls require an explicit `X-Hermes-Session-Token`.
+- CLI/PTY: official Hermes CLI or dashboard PTY only when Gateway REST and local state are unavailable.
+- Guild-owned: active pet selection, direct assignment, review approval/revision, task brief, desktop/Pet state, and report-card normalization.
+- Mock fallback: mock bridge data shown only in mock mode or auto fallback.
+- Unavailable: real mode has no verified source and must not invent data.
+
+`SystemStatus` exposes `hermesApiBaseUrl`, optional `hermesDashboardBaseUrl`, `dashboardAvailable`, and `dataSources` so UI surfaces can distinguish gateway REST, local Hermes state, dashboard compatibility, Guild-owned state, mock fallback, and unavailable data.
+
+`SystemStatus.operationalData` exposes concise read-only summaries for real gateway/local/compatibility surfaces: sessions, logs, analytics, cron jobs, config/defaults/schema, redacted env status, and gateway jobs. Env summaries must count configured keys only and must not include secret values.
+
+Current gateway REST client coverage includes:
+
+- `GET /health`
+- `GET /health/detailed`
+- `GET /v1/models`
+- `GET /v1/capabilities`
+- `POST /v1/chat/completions`
+- `POST /v1/responses`
+- `GET /v1/responses/{id}`
+- `DELETE /v1/responses/{id}`
+- `POST /v1/runs`
+- `GET /v1/runs/{run_id}`
+- `GET /v1/runs/{run_id}/events`
+- `POST /v1/runs/{run_id}/stop`
+- `GET /api/jobs`
+- `POST /api/jobs`
+- `GET /api/jobs/{job_id}`
+- `PATCH /api/jobs/{job_id}`
+- `DELETE /api/jobs/{job_id}`
+- `POST /api/jobs/{job_id}/pause`
+- `POST /api/jobs/{job_id}/resume`
+- `POST /api/jobs/{job_id}/run`
+
+Current dashboard compatibility client coverage includes:
+
+- `GET /api/status`
+- `GET /api/sessions`
+- `GET /api/sessions/{session_id}`
+- `GET /api/sessions/{session_id}/messages`
+- `GET /api/sessions/search`
+- `DELETE /api/sessions/{session_id}`
+- `GET /api/config`
+- `GET /api/config/defaults`
+- `GET /api/config/schema`
+- `PUT /api/config`
+- `GET /api/env`
+- `PUT /api/env`
+- `DELETE /api/env`
+- `GET /api/logs`
+- `GET /api/analytics/usage`
+- `GET /api/cron/jobs`
+- `POST /api/cron/jobs`
+- `POST /api/cron/jobs/{job_id}/pause`
+- `POST /api/cron/jobs/{job_id}/resume`
+- `POST /api/cron/jobs/{job_id}/trigger`
+- `DELETE /api/cron/jobs/{job_id}`
+- `GET /api/skills`
+- `PUT /api/skills/toggle`
+- `GET /api/tools/toolsets`
+
+Write endpoints are client-supported but must be invoked only from explicit user actions. Env/API-key UI must display only redacted or metadata state, never cleartext secret values.
+
+Protected dashboard compatibility endpoints are skipped unless an explicit session token is available. The official dashboard token is generated per dashboard process and is not persisted by Hermes Guild.
 
 ## Mock v0 Runtime Behavior
 
@@ -115,9 +187,12 @@ Pet Mode should not show app-authored greeting, sending, accepted, report-ready,
 - Test bridge instances are isolated and do not use persistence or cross-webview broadcast.
 - Mock lifecycle timers are owned by the webview that creates or revises a task.
 
-## v0 Source Boundaries
+## Real Runtime Behavior
 
-- Guild-maintained: active profile, direct assignment, pet position, review actions, user-facing timeline.
-- Mock bridge-derived: agent availability, task lifecycle, progress, completion, errors.
-- Guild-generated: report card, facts, assumptions, known gaps, rewards, normalized timeline.
-- Hermes-provided: none in the first mock implementation.
+- Real task execution uses Gateway REST runs and event streams.
+- Dashboard compatibility availability is checked separately from gateway availability.
+- Gateway availability decides whether auto mode uses real execution or mock fallback.
+- Dashboard compatibility unavailability or missing session-token access does not force task execution to mock fallback; affected surfaces are labeled unavailable.
+- Real mode never falls back to mock when gateway health fails.
+- Running gateway tasks can be stopped only through explicit user action and only after the run id is known.
+- Gateway run-status timeline entries are bridge-visible status evidence and should not be rendered as Pet chat bubbles.

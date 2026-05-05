@@ -8,10 +8,10 @@ Use:
 - this file for current status, decisions, checkpoints, blockers, and remaining gaps
 
 ## Current Objective
-- Build a reusable asset-based Pixel JRPG UI Kit, then apply it only to the main Guild Hall / Main Window screen for a high-fidelity low-density desktop app pass while preserving the v0 loop, RealHermes bridge, and mock/real/auto modes.
+- Finish the Hermes Guild bridge refactor so Gateway REST remains the core execution source, official dashboard backend logic is replicated into Guild-owned local bridge adapters where practical, and dashboard REST is optional/debug compatibility only.
 
 ## Current Milestone
-- Pixel UI Kit and Guild Hall fidelity pass
+- Real Hermes bridge source-precedence and dashboard-auth refactor
 
 ## Current Status
 - React v0 loop is implemented and runnable through Vite.
@@ -19,7 +19,96 @@ Use:
 - MockHermesBridge remains available.
 - RealHermesBridge is implemented as a Hermes API adapter behind the same UI-facing bridge interface.
 - Bridge factory supports `mock`, `real`, and `auto`; auto falls back to mock when real Hermes is unavailable.
-- Codex Goal status: active for asset-based Pixel UI Kit and one-screen Guild Hall fidelity verification.
+- Codex Goal status: active for real Hermes capability wiring.
+
+### 2026-05-05 CST — Dashboard compatibility auth correction
+
+#### Goal
+Correct the previous dashboard-service-first assumption after inspecting official `hermes_cli/web_server.py`.
+
+#### Changed
+- Updated `SPEC.md` and `GOAL.md` so the execution contract requires a Guild-owned bridge and does not require users to start `hermes dashboard`.
+- Updated `docs/HERMES_CAPABILITY_MATRIX.md` to distinguish Gateway REST, Local Hermes state, Dashboard compatibility, CLI/PTY, Guild-owned, mock fallback, and unavailable sources.
+- Updated `docs/API_CONTRACT.md` and `docs/HERMES_INTEGRATION_PLAN.md` to describe dashboard compatibility as optional and token-gated.
+- Added `hasProtectedAccess()` to dashboard compatibility clients.
+- Dashboard compatibility clients now skip protected `/api/*` endpoints without an explicit session token and return a clear 401-style unavailable result.
+- Dashboard compatibility clients send `X-Hermes-Session-Token` only for protected endpoints when a token is explicitly configured.
+- Bridge factory now keeps real gateway execution active when dashboard status is public/available but protected dashboard access is unavailable.
+- Protected dashboard-derived surfaces now stay `unavailable` in real mode unless an explicit token-backed compatibility client is provided.
+- Updated source labels from `dashboard-rest` to `dashboard-compatibility`.
+- Updated the Tauri HTTP bridge to accept optional request headers for token-backed compatibility calls.
+- Renamed visible settings text from `Dashboard REST` to `Dashboard compatibility`.
+
+#### Source Findings
+- Official `hermes_cli/web_server.py` generates a fresh `_SESSION_TOKEN` on dashboard server start.
+- The official dashboard accepts the dedicated `X-Hermes-Session-Token` header, with legacy bearer support.
+- The public dashboard path list is intentionally small: `/api/status`, `/api/config/defaults`, `/api/config/schema`, `/api/model/info`, and dashboard theme/plugin endpoints.
+- All other `/api/*` routes are protected by dashboard auth middleware, so Hermes Guild must not treat dashboard REST as a stable unauthenticated integration API.
+
+#### Tested
+- `bun test src/bridge/hermesDashboardApiClient.test.ts src/bridge/bridgeFactory.test.ts`: passed, 28 tests.
+- `bun test src/bridge/hermesDashboardApiClient.test.ts src/bridge/bridgeFactory.test.ts src/App.pet.test.ts`: passed, 31 tests.
+- `bun run verify:web`: passed, including TypeScript, 64 Bun tests / 242 assertions, and Vite production build.
+- `cd src-tauri && cargo fmt --check`: passed after formatting `src-tauri/src/lib.rs`.
+- `cd src-tauri && cargo check`: passed.
+
+#### Local Endpoint Probe
+- `curl -s --max-time 2 http://127.0.0.1:8642/health`: returned `{"status": "ok", "platform": "hermes-agent"}`.
+- `curl -s --max-time 2 http://127.0.0.1:8642/v1/models`: returned one `hermes-agent` model.
+- `curl -s --max-time 2 http://127.0.0.1:8642/v1/capabilities`: returned `404: Not Found`; capability endpoint is unavailable in the local Hermes version.
+- `curl -s -i --max-time 2 http://127.0.0.1:9119/api/status`: failed with curl exit code 7; dashboard compatibility service is not running locally.
+
+#### Still Unwired
+- Local Hermes state adapter is still pending for sessions, config/env redacted state, logs, analytics, cron jobs, skills, and toolsets.
+- CLI adapter remains deferred until a capability is proven CLI-only.
+- Dashboard compatibility protected reads require explicit session-token access and are unavailable by default.
+
+### 2026-05-05 CST — Gateway/dashboard REST client split
+
+#### Goal
+Start the broad real-data wiring goal with the required capability matrix and a tested bridge/client foundation for separate Hermes gateway and dashboard REST APIs.
+
+#### Changed
+- Added `docs/HERMES_CAPABILITY_MATRIX.md` mapping Guild data surfaces to Gateway REST, Dashboard REST, CLI/PTY, Guild-owned, mock fallback, or unavailable.
+- Extended `BridgeConfig` with `hermesDashboardBaseUrl`, defaulting to `http://127.0.0.1:9119`; gateway remains `http://127.0.0.1:8642`.
+- Added dashboard availability and per-surface source labels to `SystemStatus`.
+- Extended the gateway client with endpoint helpers for detailed health, models, capabilities, responses, run status, stop run, and jobs.
+- Added a dashboard REST client for status, sessions, messages, search, config/defaults/schema, env, logs, analytics, cron jobs, skills/toggle, and toolsets.
+- Updated the bridge factory so gateway health controls real/auto execution while dashboard availability is tracked separately.
+- Updated the Tauri native HTTP bridge to support `GET`, `POST`, `PUT`, `PATCH`, and `DELETE`.
+- Added bridge settings fields for both Gateway REST and Dashboard REST base URLs.
+- Wired Dashboard REST skills and toolsets onto the real active Hermes profile when `/api/skills` and `/api/tools/toolsets` are available.
+- Wired Gateway REST detailed health, models, and capabilities into provider-health/source labels and active profile equipment when those endpoints are available.
+- Wired read summaries for Dashboard REST sessions, logs, analytics, cron jobs, config/defaults/schema, and redacted env status into `SystemStatus.operationalData`.
+- Wired first-session detail/message summary through `GET /api/sessions/{session_id}` and `GET /api/sessions/{session_id}/messages`.
+- Wired Gateway REST jobs into `SystemStatus.operationalData`.
+- Added status-panel rendering for real operational summaries with source labels.
+- Added gateway run-id capture, run-status timeline recording through `GET /v1/runs/{run_id}`, and explicit running-task stop support through `POST /v1/runs/{run_id}/stop`.
+- Aligned client endpoint coverage with current official docs for `POST /v1/chat/completions`, gateway job delete/pause/resume/run, dashboard session delete, and dashboard env delete request bodies.
+
+#### Source Findings
+- Official API server docs list gateway REST surfaces on port `8642`, including health, models, capabilities, responses, runs, run events, run stop, and jobs.
+- Official dashboard docs and repository paths identify dashboard REST surfaces on port `9119` plus optional `WebSocket /api/pty` for the embedded TUI.
+- Re-checked official raw docs on 2026-05-05: API server docs also document `POST /v1/chat/completions`, `/v1/health`, run polling/stop, and gateway job delete/pause/resume/run; dashboard docs document session delete and body-based env delete.
+- Current local gateway health evidence from earlier checks returned only `{"status":"ok","platform":"hermes-agent"}`, so profile name remains a Hermes backend signal gap when no profile metadata is present.
+
+#### Still Unwired
+- Skill toggle support is client-only until an explicit user action is added.
+- Config/env/cron/job write endpoints remain client-only until explicit user actions exist.
+- CLI/PTY fallback remains documented but not implemented because the REST-first path is not exhausted.
+
+#### Local Endpoint Probe
+- `curl -s --max-time 2 http://127.0.0.1:8642/health`: returned `{"status": "ok", "platform": "hermes-agent"}`.
+- `curl -s --max-time 2 http://127.0.0.1:9119/api/status`: failed with curl exit code 7, so dashboard REST is not running locally in this session.
+
+#### Tested
+- `bun test src/bridge/bridgeFactory.test.ts`: passed, 23 tests.
+- `bun test src/bridge/hermesApiClient.test.ts src/bridge/hermesDashboardApiClient.test.ts`: passed, 12 tests.
+- `bun test src/App.pet.test.ts`: passed, 3 tests.
+- `bun run lint`: passed.
+- `bun run verify:web`: passed, including 62 tests and Vite production build.
+- `cargo fmt --check` in `src-tauri`: passed after formatting `src-tauri/src/lib.rs`.
+- `cargo check` in `src-tauri`: passed.
 
 ## Pixel UI Kit Plan — 2026-05-04 Main Window Fidelity
 
