@@ -38,6 +38,16 @@ import type { BridgeMode } from './bridge/types';
 
 const companionStateStorageKey = 'hermes-desktop.companion-state.v0';
 const hermesCharacterUrl = new URL('./assets/hermes-character.png', import.meta.url).href;
+const portraitFrameUrls = [
+  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_32 AM (1).png', import.meta.url).href,
+  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_32 AM (2).png', import.meta.url).href,
+  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_33 AM (3).png', import.meta.url).href,
+  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_33 AM (4).png', import.meta.url).href,
+  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_33 AM (5).png', import.meta.url).href,
+  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_34 AM (6).png', import.meta.url).href,
+  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_34 AM (7).png', import.meta.url).href,
+  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_35 AM (8).png', import.meta.url).href,
+];
 
 type ProviderMode = 'mock' | 'hermes';
 type PanelWindow = 'appearance' | 'companions' | 'settings';
@@ -62,6 +72,25 @@ const companionSubtitles: Record<string, string> = {
   astra: 'Productivity analyst',
   orion: 'Research specialist',
 };
+
+function getDefaultFrameUrls() {
+  return portraitFrameUrls.length ? portraitFrameUrls : [hermesCharacterUrl];
+}
+
+function hydrateAppearanceFrames(appearance: CompanionAppearance): CompanionAppearance {
+  if (appearance.frameUrls?.length) return appearance;
+  const frameUrls = getDefaultFrameUrls();
+  return {
+    ...appearance,
+    thumbnailUrl: frameUrls[0] ?? appearance.thumbnailUrl,
+    spriteSheetUrl: frameUrls[0] ?? appearance.spriteSheetUrl,
+    frameUrls,
+    frameWidth: 1254,
+    frameHeight: 1254,
+    framesPerRow: frameUrls.length,
+    fps: { idle: 5, talk: 8, think: 6, wave: 10 },
+  };
+}
 
 function getPanelWindow(): PanelWindow | null {
   if (typeof window === 'undefined') return null;
@@ -176,11 +205,10 @@ function cloneCompanionState(state: CompanionRuntimeState): CompanionRuntimeStat
 }
 
 function clampCompanionPosition(position: Companion['position']): Companion['position'] {
-  const x = Number.isFinite(position.x) ? position.x : 50;
-  const y = Number.isFinite(position.y) ? position.y : 50;
+  const y = Number.isFinite(position.y) ? position.y : 54;
   return {
-    x: Math.min(82, Math.max(18, x)),
-    y: Math.min(78, Math.max(24, y)),
+    x: 50,
+    y: Math.min(64, Math.max(42, y)),
   };
 }
 
@@ -193,17 +221,19 @@ function sanitizeCompanion(companion: Companion): Companion {
 }
 
 export function createInitialCompanionState(): CompanionRuntimeState {
+  const frameUrls = getDefaultFrameUrls();
   const defaultAppearance: CompanionAppearance = {
     id: 'hermes-default',
     name: 'Hermes Light',
     source: 'preset',
-    thumbnailUrl: hermesCharacterUrl,
-    spriteSheetUrl: hermesCharacterUrl,
-    frameWidth: 512,
-    frameHeight: 512,
+    thumbnailUrl: frameUrls[0] ?? hermesCharacterUrl,
+    spriteSheetUrl: frameUrls[0] ?? hermesCharacterUrl,
+    frameUrls,
+    frameWidth: 1254,
+    frameHeight: 1254,
     rows: { idle: 0, talk: 1, think: 2, wave: 3 },
-    framesPerRow: 4,
-    fps: { idle: 6, talk: 8, think: 6, wave: 8 },
+    framesPerRow: frameUrls.length,
+    fps: { idle: 5, talk: 8, think: 6, wave: 10 },
     background: { type: 'transparent' },
   };
 
@@ -375,11 +405,12 @@ function loadCompanionState(): CompanionRuntimeState {
     if (!stored) return initialState;
     const parsed = JSON.parse(stored) as Partial<CompanionRuntimeState>;
     const companions = parsed.companions?.length ? parsed.companions.map((companion) => sanitizeCompanion(companion)) : initialState.companions;
+    const appearances = parsed.appearances?.length ? parsed.appearances.map((appearance) => hydrateAppearanceFrames(appearance)) : initialState.appearances;
     return {
       ...initialState,
       ...parsed,
       companions,
-      appearances: parsed.appearances?.length ? parsed.appearances : initialState.appearances,
+      appearances,
       settings: { ...initialState.settings, ...parsed.settings },
       selectedCompanionId: parsed.selectedCompanionId ?? initialState.selectedCompanionId,
     };
@@ -413,10 +444,13 @@ function App() {
     },
   ]);
   const [animation, setAnimation] = useState<AnimationState>('idle');
+  const [avatarFrameIndex, setAvatarFrameIndex] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const suppressNextClick = useRef(false);
 
   useEffect(() => {
     persistCompanionState(runtime);
@@ -441,6 +475,8 @@ function App() {
 
   const selectedCompanion = runtime.companions.find((companion) => companion.id === runtime.selectedCompanionId) ?? runtime.companions[0];
   const selectedAppearance = runtime.appearances.find((appearance) => appearance.id === selectedCompanion.appearanceId) ?? runtime.appearances[0];
+  const activeFrameUrls = selectedAppearance.frameUrls?.length ? selectedAppearance.frameUrls : [selectedAppearance.spriteSheetUrl];
+  const activeAvatarFrameUrl = activeFrameUrls[avatarFrameIndex % activeFrameUrls.length] ?? selectedAppearance.spriteSheetUrl;
   const activeMessage = [...messages].reverse().find((message) => message.role === 'assistant');
   const providerMode = getCompanionProviderMode(bridgeConfig.bridgeMode, snapshot.systemStatus.hermesAvailable);
   const provider = useMemo(
@@ -448,6 +484,18 @@ function App() {
     [bridge, bridgeReady, providerMode],
   );
   const bridgeUnavailable = providerMode === 'hermes' && snapshot.systemStatus.hermesAvailable !== 'available';
+
+  useEffect(() => {
+    setAvatarFrameIndex(0);
+    if (activeFrameUrls.length <= 1) return undefined;
+
+    const fps = selectedAppearance.fps[animation] || 6;
+    const intervalId = window.setInterval(() => {
+      setAvatarFrameIndex((index) => (index + 1) % activeFrameUrls.length);
+    }, 1000 / fps);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeFrameUrls, animation, selectedAppearance.fps]);
 
   const updateRuntime = (recipe: (state: CompanionRuntimeState) => void) => {
     setRuntime((current) => {
@@ -486,12 +534,10 @@ function App() {
 
   const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
     if (!runtime.settings.allowDragging || !selectedCompanion.behavior.allowDrag) return;
-    if (event.button === 0 && startNativeWindowDrag()) {
-      event.preventDefault();
-      return;
-    }
+    if (event.button !== 0) return;
 
-    setIsDragging(true);
+    dragStart.current = { x: event.clientX, y: event.clientY };
+    suppressNextClick.current = false;
     const rect = event.currentTarget.getBoundingClientRect();
     dragOffset.current = {
       x: event.clientX - rect.left,
@@ -501,20 +547,46 @@ function App() {
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLButtonElement>) => {
-    if (!isDragging) return;
-    const nextX = ((event.clientX - dragOffset.current.x) / window.innerWidth) * 100;
+    if (!dragStart.current) return;
+    const deltaX = event.clientX - dragStart.current.x;
+    const deltaY = event.clientY - dragStart.current.y;
+    if (!isDragging && Math.hypot(deltaX, deltaY) < 5) return;
+
+    suppressNextClick.current = true;
+    if (!isDragging && startNativeWindowDrag()) {
+      dragStart.current = null;
+      event.currentTarget.releasePointerCapture(event.pointerId);
+      event.preventDefault();
+      return;
+    }
+
+    setIsDragging(true);
     const nextY = ((event.clientY - dragOffset.current.y) / window.innerHeight) * 100;
     updateSelectedCompanion({
       position: {
-        x: Math.min(82, Math.max(18, nextX)),
-        y: Math.min(78, Math.max(24, nextY)),
+        x: 50,
+        y: Math.min(64, Math.max(42, nextY)),
       },
     });
   };
 
   const handlePointerUp = (event: PointerEvent<HTMLButtonElement>) => {
+    dragStart.current = null;
     setIsDragging(false);
-    event.currentTarget.releasePointerCapture(event.pointerId);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleCompanionButtonClick = (companionId: string) => {
+    if (suppressNextClick.current) {
+      suppressNextClick.current = false;
+      return;
+    }
+    updateRuntime((state) => {
+      state.selectedCompanionId = companionId;
+    });
+    handleCompanionClick();
   };
 
   const handleSubmit = async (event: FormEvent) => {
@@ -639,19 +711,14 @@ function App() {
               '--companion-scale': companion.scale,
             } as CSSProperties}
             aria-label={`Chat with ${companion.name}`}
-            onClick={() => {
-              updateRuntime((state) => {
-                state.selectedCompanionId = companion.id;
-              });
-              handleCompanionClick();
-            }}
+            onClick={() => handleCompanionButtonClick(companion.id)}
             onPointerDown={companion.id === selectedCompanion.id ? handlePointerDown : undefined}
             onPointerMove={companion.id === selectedCompanion.id ? handlePointerMove : undefined}
             onPointerUp={companion.id === selectedCompanion.id ? handlePointerUp : undefined}
             onContextMenu={companion.id === selectedCompanion.id ? handleCompanionContextMenu : undefined}
           >
             <span className={`companion-art companion-art-${animation}`} aria-hidden="true">
-              <img src={selectedAppearance.spriteSheetUrl} alt="" />
+              <img src={activeAvatarFrameUrl} alt="" />
             </span>
             <span className="companion-shadow" />
           </button>
@@ -860,17 +927,18 @@ function AppearanceSourceNotice({ source }: { source: AppearanceSource }) {
 }
 
 function SpriteSheetPreview({ appearance }: { appearance: CompanionAppearance }) {
+  const frameUrls = appearance.frameUrls?.length ? appearance.frameUrls : [appearance.spriteSheetUrl];
   return (
     <div className="sprite-section">
-      <span className="section-label">Sprite Sheet Preview</span>
-      <div className="sprite-grid" aria-label="Sprite Sheet Preview">
-        {Array.from({ length: appearance.framesPerRow * 4 }, (_, index) => (
+      <span className="section-label">Sprite Animation Preview</span>
+      <div className="sprite-grid" aria-label="Sprite Animation Preview">
+        {frameUrls.map((frameUrl, index) => (
           <span key={index} className="sprite-frame">
-            <img src={appearance.spriteSheetUrl} alt="" />
+            <img src={frameUrl} alt="" />
           </span>
         ))}
       </div>
-      <small>16 frames · {appearance.frameWidth}×{appearance.frameHeight} px</small>
+      <small>{frameUrls.length} frames · {appearance.frameWidth}×{appearance.frameHeight} px</small>
     </div>
   );
 }

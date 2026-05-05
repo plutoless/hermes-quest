@@ -289,6 +289,7 @@ export interface CompanionAppearance {
   source: AppearanceSource;
   thumbnailUrl: string;
   spriteSheetUrl: string;
+  frameUrls?: string[];
   frameWidth: number;
   frameHeight: number;
   rows: {

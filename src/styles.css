@@ -94,10 +94,9 @@ button {
   position: absolute;
   left: var(--companion-x);
   top: var(--companion-y);
-  height: min(100vh, 575px);
-  width: auto;
+  width: min(100vw, 390px);
   min-width: 0;
-  aspect-ratio: 385 / 760;
+  aspect-ratio: 1;
   padding: 0;
   border: 0;
   background: transparent;
@@ -127,10 +126,10 @@ button {
 
 .companion-art img {
   display: block;
-  width: auto;
+  width: 100%;
   height: 100%;
   object-fit: contain;
-  object-position: 50% 100%;
+  object-position: 50% 50%;
   opacity: 0.98;
 }
 
@@ -707,8 +706,7 @@ button {
   }
 
   .companion-figure-button {
-    height: min(100vh, 575px);
-    width: auto;
+    width: min(100vw, 390px);
   }
 }
 
@@ -726,8 +724,7 @@ button {
 
   .companion-figure-button {
     top: 50%;
-    height: min(100vh, 575px);
-    width: auto;
+    width: min(100vw, 390px);
   }
 
   .chat-input-capsule {
@@ -768,8 +765,7 @@ button {
 
   .companion-figure-button {
     top: 50%;
-    height: min(100vh, 575px);
-    width: auto;
+    width: min(100vw, 390px);
   }
 
   .appearance-popover,
@@ -826,8 +822,7 @@ button {
 
   .companion-figure-button {
     top: 50%;
-    height: min(100vh, 575px);
-    width: auto;
+    width: min(100vw, 390px);
   }
 
   .chat-input-capsule {

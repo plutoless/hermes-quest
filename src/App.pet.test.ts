@@ -20,13 +20,12 @@ describe('Hermes companion runtime', () => {
     expect(html).not.toContain('Good morning!');
     expect(html).not.toContain('floating-toolbar');
     expect(html).not.toContain('Companion menu');
-    expect(html).not.toContain('Sprite Sheet Preview');
+    expect(html).not.toContain('Sprite Animation Preview');
     expect(html).not.toContain('Show on desktop');
 
     expect(html).not.toContain('Guild Hall');
     expect(html).not.toContain('Quest Board');
     expect(html).not.toContain('Review Chamber');
-    expect(html).not.toContain('pixel-ui-showcase');
   });
 
   test('panel routes render isolated control windows', () => {
@@ -39,7 +38,7 @@ describe('Hermes companion runtime', () => {
       });
       const appearanceHtml = renderToStaticMarkup(React.createElement(App));
       expect(appearanceHtml).toContain('panel-window-appearance');
-      expect(appearanceHtml).toContain('Sprite Sheet Preview');
+      expect(appearanceHtml).toContain('Sprite Animation Preview');
       expect(appearanceHtml).not.toContain('desktop-companion-shell');
 
       Object.defineProperty(globalThis, 'window', {
@@ -73,11 +72,12 @@ describe('Hermes companion runtime', () => {
     expect(state.appearances[0]).toMatchObject({
       id: 'hermes-default',
       source: 'preset',
-      frameWidth: 512,
-      frameHeight: 512,
-      framesPerRow: 4,
+      frameWidth: 1254,
+      frameHeight: 1254,
+      framesPerRow: 8,
       rows: { idle: 0, talk: 1, think: 2, wave: 3 },
     });
+    expect(state.appearances[0].frameUrls).toHaveLength(8);
     expect(state.settings).toMatchObject({
       alwaysOnTop: true,
       rememberPositions: true,
