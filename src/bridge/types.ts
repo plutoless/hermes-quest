@@ -1,4 +1,4 @@
-import type { Agent, BridgeEvent, BridgeSnapshot, CreateTaskInput, PetPosition, ProfileContext, ReportCard, Task } from '../types';
+import type { Agent, BridgeEvent, BridgeSnapshot, CreateTaskInput, PetPosition, ProfileContext, ProfileDetails, ReportCard, Task } from '../types';
 
 export type BridgeMode = 'mock' | 'real' | 'auto';
 export type Listener = (snapshot: BridgeSnapshot, event: BridgeEvent) => void;
@@ -90,6 +90,10 @@ export interface HermesApiClient {
 
 export interface HermesProfileRunClient {
   runTask(input: HermesApiRunTaskInput): Promise<HermesApiRunTaskResult>;
+}
+
+export interface HermesProfileDetailsClient {
+  getProfileDetails(profile: HermesProfileMetadata): Promise<ProfileDetails>;
 }
 
 export interface HermesEndpointResult<T> {
@@ -193,6 +197,7 @@ export interface HermesBridgeApi {
   listAgents?(): Promise<Agent[]>;
   setActiveAgent?(agentId: string): Promise<void>;
   getActiveAgent?(): Promise<Agent>;
+  getProfileDetails?(profileId: string): Promise<ProfileDetails>;
   submitTask?(input: CreateTaskInput): Promise<string>;
   getTask?(taskId: string): Promise<Task | undefined>;
   reviseTask?(reportId: string, instructions: string): Promise<string | undefined>;

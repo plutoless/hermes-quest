@@ -1,284 +1,377 @@
-# Profile Context Routed Chat Spec
+# Hermes Desktop Companion v0 Remake Spec
 
 ## Goal
 
-Make Hermes Guild route Pet and Quest Board chat/task execution through the selected Hermes profile end to end, without modifying Hermes source code and without depending on users starting the standalone Hermes dashboard service.
+Remake the product around `docs/v0-remake-prd.md`: a borderless desktop AI companion whose primary interface is the floating Hermes character, not a dashboard or task workbench.
 
-The selected profile must become a first-class execution context:
+The PRD supersedes the previous Guild Hall / Quest Board / Review Chamber product direction for v0 normal runtime. Keep the Hermes communication bridge where useful, but expose it through a small chat-provider adapter for the companion experience instead of through dashboard, task-board, or review workflows.
 
-- profile selection in the UI binds the current Pet/chat/task context
-- new Pet messages and Quest Board tasks carry that profile context into the bridge
-- the bridge resolves a verified execution route using the source precedence below
-- the resulting task, timeline, report card, and system status state the real route used
-- Pet chat shows only user-submitted text, actual Hermes output/progress text, and concise errors
+The visual target is `docs/design.png`. The implementation should match its product language: elegant mature anime concierge, white/silver/lavender palette, visible desktop/background, translucent detached popovers, compact controls, speech bubble, and bottom input capsule.
 
-If no verified route can execute against the selected profile, Hermes Guild must show an explicit unavailable state instead of pretending assignment equals Hermes routing. Mock is test-only.
+## Product Boundary
 
-## Source Precedence
+Option A is user-approved: the PRD becomes the source of truth for v0.
 
-Use the user's required precedence for every real profile and routing signal:
+Normal product runtime must be companion-first:
 
-1. Public official Hermes REST
-2. Stable official Hermes CLI
-3. Safe read-only local Hermes state
-4. Hermes Guild Python sidecar compatibility service
-5. Guild-owned workflow state
-6. Unavailable
+- floating Hermes character
+- speech bubble
+- lightweight input bar
+- Companions popover
+- Appearance popover
+- compact Settings popover
 
-Mock data is allowed only in tests and explicit development harnesses. Mock is not a runtime fallback.
+Normal product runtime must not include:
 
-## Product Behavior
+- Guild Hall dashboard
+- Quest Board
+- Review Chamber
+- pixel/JRPG dashboard variants
+- left sidebar or full navigation shell
+- task board, timeline, report card, artifact center, or profile management surfaces
 
-### Profile Context
+Existing Hermes bridge/client/sidecar/native communication code can remain if it is still useful for chat execution, health checks, or future compatibility. It should not force dashboard product concepts into the user-facing v0 companion UI.
 
-Hermes Guild should maintain a `ProfileContext` for new chat/task execution:
+## User-Visible Behavior
 
-- `profileId`: Guild-stable profile id
-- `profileName`: real Hermes profile name from REST/CLI/local/sidecar metadata
-- `source`: source that provided profile identity
-- `routingSource`: source that can execute selected-profile runs, if any
-- `routingMode`: `request`, `session`, `cli`, `sidecar`, or `unavailable`
-- `sessionId`: Guild chat/task session id when session context exists
-- `verified`: whether the execution route is proven for the current installed Hermes
-- `unavailableReason`: exact reason when routing cannot be verified
+### First Launch
 
-The effective profile for new work is resolved in this order:
+When the app opens:
 
-1. explicit profile selected for the task/message
-2. current Pet/session-bound profile
-3. Hermes active profile only when a selected profile is not required
-4. validation error or explicit unavailable state
+1. A default Hermes companion appears in a transparent, frameless, always-on-top desktop window or overlay.
+2. Hermes plays an idle animation.
+3. A compact speech bubble appears with PRD-style greeting copy.
+4. A slim input capsule appears near Hermes or near the lower center of the overlay with placeholder `Ask Hermes anything...`.
+5. Clicking Hermes focuses the input.
+6. Small detached controls allow opening Companions, Appearance, and Settings popovers.
 
-Switching the active profile affects new messages/tasks only. Existing task history, report cards, and session records must keep the profile context that was used when they were created.
+### Daily Use
 
-### Routed Chat
+- Hermes floats above the desktop without a visible app frame.
+- The user can drag Hermes when dragging is enabled.
+- Position, scale, visibility, and settings persist locally.
+- The user can click Hermes to chat.
+- The user can show/hide companions through the Companions popover.
+- The user can adjust appearance through the Appearance popover.
+- The app never opens a dashboard by default.
 
-Pet Mode and Quest Board must both use the same bridge route for selected-profile execution:
+### Chat Flow
 
-- opening Pet Mode shows the selected profile and route availability
-- sending a Pet message creates a task/chat entry assigned to that selected profile
-- Quest Board direct assignment creates a task using that task's selected assignee profile
-- bridge run metadata records the selected profile, routing source, route mode, Hermes run id when present, and route evidence
-- status chips or Integration Truth may show routing labels, but Pet chat bubbles must not show lifecycle wrapper text as if the agent said it
+1. User clicks Hermes.
+2. Input appears and focuses.
+3. User enters text and presses Enter or send.
+4. Input clears.
+5. Hermes switches to `think`.
+6. If response takes more than 500ms, show a short thinking bubble.
+7. The configured provider returns a response.
+8. Hermes switches to `talk` and shows the response in the speech bubble.
+9. After timeout, Hermes returns to `idle`.
 
-Routed chat is considered working end to end only when a real route executes against the selected Hermes profile or the UI gives a precise, verified unavailable reason after all allowed sources were checked.
+Chat history stays minimal in v0. A full chat page is out of scope.
 
-## Route Resolution Requirements
+## Core Components
 
-### 1. Public REST
+### Desktop Companion Runtime
 
-Prefer public REST when the installed Hermes gateway advertises support.
+Requirements:
 
-Hermes Guild may use REST profile routing only when metadata proves support for profile discovery plus request/session execution routing, for example:
+- transparent frameless window or equivalent overlay
+- always-on-top support
+- companion click interaction
+- right-click or small control trigger
+- drag positioning
+- persisted position and scale
+- state-based animation switching
+- one or more visible companions in the local data model, with at least the default Hermes companion bundled
 
-```json
-{
-  "profiles": {
-    "list": true,
-    "active": true,
-    "request_context": true,
-    "session_context": true,
-    "run_routing": true
-  }
+Preferred window model:
+
+- one transparent overlay window that renders companion, bubble, input, and popovers together
+
+If platform limitations make a full-screen transparent overlay impractical, the implementation may use a transparent frameless pet window as the v0 stepping stone, but it must still avoid dashboard chrome and make the companion the main surface.
+
+### Speech Bubble
+
+Requirements:
+
+- small rounded frameless bubble
+- visually attached to the companion with a tail or clear spatial relationship
+- short messages only
+- stays within screen bounds as practical
+- fades in/out smoothly
+- does not become a chat window
+
+### Floating Input Bar
+
+Requirements:
+
+- compact capsule, not a panel
+- placeholder `Ask Hermes anything...`
+- supports Enter-to-send
+- send button
+- optional microphone icon placeholder
+- auto-hides after inactivity when empty if implemented without harming usability
+
+### Companions Popover
+
+Requirements:
+
+- detached glass popover
+- list companion thumbnail, name, subtitle/status, visibility toggle
+- select a companion for appearance editing
+- `Add Companion` entry may be a placeholder in v0
+- language uses `Companions`, `Show on desktop`, and similar presence-focused terms
+
+### Appearance Popover
+
+Requirements:
+
+- detached compact panel matching `docs/design.png`
+- selected companion portrait/preview
+- name field
+- show-on-desktop toggle
+- size slider
+- `Preset`, `Generate`, `Upload` tabs
+- animation preview controls for `Idle`, `Talk`, `Think`, `Wave`
+- sprite sheet preview using the 4x4 v0 format
+- apply selected appearance to the desktop companion immediately
+
+`Generate` and `Upload` may be placeholder flows if full generation/file handling is too large for the v0 remake, but placeholders must be honest and must not silently pretend assets were generated or uploaded.
+
+### Settings Popover
+
+Requirements:
+
+- compact popover, not a settings app
+- app-level settings only:
+  - launch at startup
+  - always on top
+  - remember positions
+  - allow dragging
+  - show speech bubbles
+  - quiet mode
+  - click-through mode
+  - low resource mode
+- no provider dashboard, task workflow settings, tool registry, or profile management
+
+## Data Model
+
+Implement or adapt frontend-facing local objects equivalent to the PRD models:
+
+```ts
+export type CompanionStatus = "idle" | "thinking" | "talking" | "away" | "hidden";
+export type AnimationState = "idle" | "talk" | "think" | "wave";
+export type AppearanceSource = "preset" | "generated" | "uploaded";
+
+export interface Companion {
+  id: string;
+  name: string;
+  description?: string;
+  visible: boolean;
+  status: CompanionStatus;
+  appearanceId: string;
+  position: { x: number; y: number };
+  scale: number;
+  behavior: {
+    allowDrag: boolean;
+    showSpeechBubbles: boolean;
+    idleAtScreenEdge?: boolean;
+    clickThrough?: boolean;
+  };
+  agent?: {
+    agentId?: string;
+    provider?: string;
+    model?: string;
+  };
+}
+
+export interface CompanionAppearance {
+  id: string;
+  name: string;
+  source: AppearanceSource;
+  thumbnailUrl: string;
+  spriteSheetUrl: string;
+  frameWidth: number;
+  frameHeight: number;
+  rows: { idle: number; talk: number; think: number; wave: number };
+  framesPerRow: number;
+  fps: { idle: number; talk: number; think: number; wave: number };
+  background?: { type: "transparent" | "chroma"; chromaKey?: string };
 }
 ```
 
-When supported:
+Persist locally:
 
-- `GET /v1/profiles` and `GET /v1/profile/active` provide profile identity
-- `POST /v1/runs` may include the selected profile name
-- session-scoped routing may use `session_id` plus profile metadata when advertised
-- run responses/events should be parsed for returned profile/routing metadata
+- companions
+- appearances
+- positions
+- scale
+- visibility
+- settings
+- last selected companion
 
-When unsupported:
+Browser/local storage is acceptable for web development. Tauri/local filesystem persistence is acceptable or preferred when the native shell path is touched.
 
-- do not send `profile`, `profile_id`, or `profile_name` fields to `/v1/runs`
-- do not send unadvertised `X-Hermes-Profile` headers
-- continue to CLI/local/sidecar route discovery
+## Sprite System
 
-### 2. CLI
+Support the PRD v0 standard:
 
-Investigate stable official CLI execution before using the sidecar as an execution route.
+- 4 rows x 4 columns
+- 16 frames total
+- row 0: idle
+- row 1: talk
+- row 2: think
+- row 3: wave
+- equal frame width and height
+- transparent PNG/WebP preferred
+- chroma key supported when transparency is unavailable, recommended key `#FF00FF`
 
-Required discovery:
+The default Hermes preset must have enough bundled visual assets to render all four animation states. If a production sprite sheet is not available, implement a clear PRD-compatible preset placeholder that can be replaced by a real generated sheet without changing the component API.
 
-- inspect `hermes --help`
-- inspect `hermes profile --help`
-- inspect any run/chat/agent command help that can execute a single request
-- verify whether a per-command profile selector exists, such as a documented flag or environment contract
-- prove the route does not call `hermes profile use` and does not mutate global active profile state
+## Chat Provider And Hermes Bridge
 
-If a stable CLI route exists, Hermes Guild may implement a CLI adapter through the native/Tauri bridge or Python sidecar, provided command arguments are bounded and no shell interpolation is used for user content.
+Keep the communication bridge with Hermes, but simplify the UI-facing contract:
 
-### 3. Local State
+```ts
+export interface ChatMessage {
+  role: "user" | "assistant" | "system";
+  content: string;
+  timestamp: number;
+}
 
-Local Hermes state may be used for read-only metadata and route evidence only when the files are safe to read and understood.
+export interface ChatProvider {
+  sendMessage(input: {
+    companionId: string;
+    messages: ChatMessage[];
+  }): Promise<ChatMessage>;
+}
+```
 
-Local state must not be used to fake execution routing. It may support execution only if official code or docs prove that a local-state value can scope a single request/session without global mutation.
+Provider modes:
 
-### 4. Python Sidecar
+- `mock`: explicit local/demo mode with canned responses
+- `hermes`: use existing Hermes bridge/client/sidecar routes where available
 
-The Python sidecar is a compatibility layer, not a shortcut around official sources.
+Mock mode is allowed by the PRD so the app works without a real AI backend, but it must be explicit in code/config/UI state and must not masquerade as real Hermes. Do not silently substitute mock responses when the user has selected real Hermes mode and Hermes is unavailable.
 
-Use sidecar execution only when:
+The old task/review bridge API may remain internally during the remake if removing it would create unnecessary risk, but normal companion UI must not expose quests, reports, task boards, or review chambers.
 
-- public REST lacks selected-profile routing
-- no stable direct CLI route can be called safely from the app
-- the sidecar can execute Hermes under a selected profile using verified official mechanisms without editing Hermes source
-- the sidecar is loopback-only and returns structured route evidence
+## Visual Requirements
 
-If implemented, sidecar endpoints should be explicit and typed, for example:
+Use `docs/design.png` as the concrete visual reference:
 
-- `POST /runs`
-- `GET /runs/{run_id}`
-- `GET /runs/{run_id}/events`
-- `POST /runs/{run_id}/stop`
+- Hermes character is the dominant interface
+- desktop/background remains visible
+- top-left product identity may be present but must not become navigation
+- panels are detached glass popovers with subtle blur/shadow
+- palette is white, silver, soft gray, lavender, and restrained violet
+- typography is clean and mature
+- controls are compact and stable
+- no JRPG/pixel styling in the normal v0 product
+- no full-screen dashboard shell
+- no sidebar app navigation
+- no decorative stats, levels, XP, loot, or fantasy dashboards
 
-Each run response must include the selected profile, routing source/mode, command/import mechanism used, and whether the route was verified.
-
-### 5. Guild-Owned And Unavailable
-
-Guild-owned assignment remains useful for UI, review, and history, but it is not proof that Hermes executed under that profile.
-
-When no route is verified:
-
-- keep selected profile as Guild-owned assignment
-- mark execution routing as `unavailable`
-- show the exact probe evidence or blocker
-- do not claim the Hermes run used the selected profile
-
-## WebUI Reference
-
-Read `../hermes-webui` only as a reference for official behavior. Do not require the dashboard service in normal Guild execution.
-
-Known useful WebUI patterns:
-
-- sessions can carry a `profile`
-- chat start uses the session profile rather than requiring profile on every message
-- streaming resolves `session.profile` to profile home/runtime environment before constructing/running the Hermes agent
-- server request-local profile context is used for dashboard API calls
-
-The goal is to replicate the compatible logic inside Hermes Guild adapters when official mechanisms allow it, not to proxy through the dashboard service or patch Hermes.
-
-## UI Requirements
-
-- Pet profile switcher and Guild profile controls must set the same active profile context for new work.
-- Pet chat input remains minimal: no demo prefill, no greeting, no `Quest accepted`, no `Returned output:` wrapper, no report-ready narration.
-- Pet chat displays user text, raw Hermes output/progress text, and concise errors only.
-- Quest Board task detail/timeline shows selected profile, actual routing source, run id, and unavailable reason when relevant.
-- Integration Truth/System Status shows public REST, CLI, local state, sidecar, Guild-owned, and unavailable source labels distinctly.
-- UI must not use mock data in real/auto mode.
-
-## Non-Goals
-
-- Do not edit, patch, monkey-patch, vendor, or write tests into Hermes source.
-- Do not require users to run `hermes dashboard`.
-- Do not use protected dashboard APIs as the normal execution path.
-- Do not use `hermes profile use` or any global active-profile mutation for per-task or per-session routing.
-- Do not invent profile identity from Guild presets or manual overrides.
-- Do not use fake route labels to make the UI appear complete.
-- Do not implement profile creation/editing.
-- Do not build multi-pet, multi-agent orchestration, Tavern, Skill Deck, Infirmary, or decorative RPG stats.
+Responsive behavior should preserve the same mental model at smaller windows: companion and input remain primary, popovers stay compact, and text must not overlap controls.
 
 ## Likely Files
 
-Core Guild files:
+Read first:
 
+- `AGENTS.md`
+- `docs/v0-remake-prd.md`
+- `docs/design.png`
 - `src/App.tsx`
+- `src/styles.css`
 - `src/types.ts`
 - `src/bridge/types.ts`
-- `src/bridge/realHermesBridge.ts`
 - `src/bridge/bridgeFactory.ts`
-- `src/bridge/hermesApiClient.ts`
-- `src/bridge/hermesProfileClient.ts`
-- `src/bridge/hermesSidecarClient.ts`
+- `src/bridge/realHermesBridge.ts`
+- `src/bridge/mockHermesBridge.ts`
+- `src/hooks/useBridgeSnapshot.ts`
+- `src-tauri/tauri.conf.json`
 - `src-tauri/src/lib.rs`
-- `sidecar/hermes_guild_sidecar.py`
-
-Tests:
-
 - `src/App.pet.test.ts`
-- `src/bridge/hermesApiClient.test.ts`
-- `src/bridge/bridgeFactory.test.ts`
-- `src/bridge/hermesProfileClient.test.ts`
-- `src/bridge/hermesSidecarClient.test.ts`
-- `sidecar/tests/`
+- `package.json`
 
-Docs:
+Likely implementation areas:
 
-- `docs/API_CONTRACT.md`
-- `docs/HERMES_CAPABILITY_MATRIX.md`
-- `docs/HERMES_INTEGRATION_PLAN.md`
-- `docs/EXECUTION_LOG.md`
-- `AGENTS.md`
+- `src/App.tsx`
+- `src/styles.css`
+- `src/types.ts`
+- new focused companion UI/components under `src/ui/` if useful
+- bridge adapter files under `src/bridge/` if needed for `ChatProvider`
+- `src-tauri/tauri.conf.json`
+- `src-tauri/src/lib.rs`
+- tests for chat flow, persistence, and route removal
 
-Read-only references:
+Legacy pixel/JRPG assets and component files may be removed from normal runtime imports if no longer used. Avoid deleting large asset directories unless the implementation clearly no longer references them and doing so is low risk.
 
-- `/Users/plutoless/.hermes/hermes-agent/gateway/platforms/api_server.py`
-- `/Users/plutoless/Documents/hermes-webui/api/routes.py`
-- `/Users/plutoless/Documents/hermes-webui/api/streaming.py`
-- `/Users/plutoless/Documents/hermes-webui/api/profiles.py`
-- `/Users/plutoless/Documents/hermes-webui/server.py`
+## Non-Goals
 
-## Verification
+- Do not keep Guild Hall, Quest Board, Review Chamber, pixel/JRPG dashboard variants, or dashboard navigation in normal runtime.
+- Do not implement task assignment, quest execution, timeline visibility, report card review, or artifact workflows in v0 remake.
+- Do not build Tavern, Skill Deck, Infirmary, Archive, multi-agent orchestration, or marketplace surfaces.
+- Do not build complex provider setup UI.
+- Do not build a large chat history page.
+- Do not build complex sprite generation or file management if compact placeholders satisfy the PRD v0.
+- Do not choose Godot or rewrite the stack away from Tauri/React.
+- Do not modify Hermes source outside this repository.
 
-Focused tests should cover:
+## Acceptance Criteria
 
-- active profile selection updates the `ProfileContext` for new work
-- switching profile does not rewrite existing task/session history
-- Pet chat and Quest Board both pass selected profile context into bridge execution
-- REST route sends selected profile only when capability metadata advertises routing
-- unsupported REST route omits profile fields and continues to next allowed source
-- CLI/local/sidecar route discovery records exact support or blocker evidence
-- sidecar selected-profile run endpoints either execute through a verified mechanism or return structured unsupported responses
-- Pet chat contains no lifecycle wrappers
-- Integration Truth shows the real routing source or unavailable reason
+User-approved `done_when` criteria:
 
-Commands:
+- Default runtime launches as a borderless, transparent, always-on-top desktop companion experience, not a dashboard.
+- Normal v0 UI contains only floating companion, speech bubble, input bar, Companions popover, Appearance popover, and compact Settings popover.
+- Existing Guild Hall, Quest Board, Review Chamber, pixel/JRPG dashboard variants, and full app navigation are removed from normal product runtime.
+- Hermes bridge/client/sidecar/native communication paths are preserved where useful behind a simple `ChatProvider` or equivalent adapter for companion chat.
+- The companion supports click-to-chat, drag positioning, persisted position/scale/visibility/settings, and animation states: `idle`, `talk`, `think`, `wave`.
+- Companion data and appearance data follow `docs/v0-remake-prd.md`, including 4x4 sprite sheet support and preset/upload/generate placeholders where generation/upload is not fully implemented.
+- Mock/local mode works without Hermes and is explicit, not silently confused with real Hermes.
+- Tauri config supports the companion-first transparent window model.
+- Visual implementation tracks `docs/design.png`: Hermes character is the dominant interface, desktop/background remains visible, controls are detached glass popovers, the palette is white/silver/lavender, and the UI avoids JRPG/pixel/dashboard styling.
+- `bun run verify:web` passes.
+- Native checks pass if Tauri/Rust files change.
+- Manual checks confirm no full dashboard UI appears by default, popovers stay compact, text does not overlap, and desktop companion interactions work.
+
+## Verification Commands
+
+Required focused checks should be adjusted to match final file boundaries, but start with:
 
 ```bash
-bun test src/bridge/hermesApiClient.test.ts
-bun test src/bridge/bridgeFactory.test.ts
-bun test src/bridge/hermesProfileClient.test.ts
-bun test src/bridge/hermesSidecarClient.test.ts
 bun test src/App.pet.test.ts
-python3 -m unittest discover sidecar/tests
+bun test src/bridge/bridgeFactory.test.ts
 bun run verify:web
+```
+
+If native files change:
+
+```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo check
 ```
 
-Manual/probe checks:
+Manual/browser checks should use the local dev server:
 
 ```bash
-git -C /Users/plutoless/.hermes/hermes-agent status --short
-curl -s --max-time 2 http://127.0.0.1:8642/health
-curl -s --max-time 2 http://127.0.0.1:8642/v1/profiles
-curl -s --max-time 2 http://127.0.0.1:8642/v1/profile/active
-curl -s --max-time 2 http://127.0.0.1:8642/v1/capabilities
-hermes --help
-hermes profile --help
-hermes profile list
+bun run dev -- --port 1425
 ```
 
-Manual UI check:
+Inspect:
 
-- open `/?mode=pet&variant=skyship-command-deck&pet=expanded`
-- confirm input is empty and focused
-- select a non-default profile if available
-- send a Pet message
-- confirm the task/report shows the selected profile and actual route source
-- confirm Pet bubbles show only user text and raw Hermes output/progress/error
-- confirm no `Quest accepted`, `Returned output:`, greeting, report-ready, or fake routing text appears
+- `http://127.0.0.1:1425/`
+- `http://127.0.0.1:1425/?mode=pet`
+- any explicit development/demo route added for popover states
 
-## Done When
+Manual pass criteria:
 
-- `SPEC.md` and `GOAL.md` define profile context routed chat as the active goal.
-- Hermes source checkout remains unmodified.
-- Profile selection in Pet/Guild creates a `ProfileContext` used by new Pet messages and Quest Board tasks.
-- Public REST profile routing is used only when capability metadata proves support.
-- CLI, local-state, and sidecar routes are investigated and either implemented with tests or rejected with exact evidence.
-- If a sidecar execution route is implemented, it runs loopback-only and returns structured profile routing metadata.
-- Routed chat works end to end through the best verified source for the installed Hermes.
-- If no source can route selected-profile execution, UI and docs show a precise unavailable state and no fake routing.
-- Tests and verification commands above pass, or any unavailable command is documented with the exact blocker.
+- default route is companion-first, not dashboard-first
+- no Guild Hall / Quest Board / Review navigation appears in normal runtime
+- Hermes companion can be clicked, dragged, and chatted with
+- speech bubble, input capsule, Companions popover, Appearance popover, and Settings popover are usable
+- popovers remain compact and detached
+- visual hierarchy and palette track `docs/design.png`
+- text does not overlap controls at tested desktop and constrained widths
+- explicit mock mode works without Hermes
+- real Hermes mode uses Hermes bridge or reports a concrete unavailable state without silent mock fallback

@@ -17,8 +17,8 @@ const fail = (message) => {
   process.exit(1);
 };
 
-if (config.productName !== 'Hermes Guild') {
-  fail('productName must be "Hermes Guild"');
+if (config.productName !== 'Hermes') {
+  fail('productName must be "Hermes"');
 }
 
 if (!config.build?.devUrl || !config.build?.frontendDist) {
@@ -44,9 +44,14 @@ if (!Array.isArray(windows)) {
 
 const mainWindow = windows.find((window) => window.label === 'main');
 const petWindow = windows.find((window) => window.label === 'pet');
+const panelLabels = ['appearance', 'companions', 'settings'];
+const panelWindows = panelLabels.map((label) => windows.find((window) => window.label === label));
 
 if (!mainWindow) fail('main window is missing');
 if (!petWindow) fail('pet window is missing');
+panelLabels.forEach((label, index) => {
+  if (!panelWindows[index]) fail(`${label} panel window is missing`);
+});
 
 for (const key of [...requiredWindowKeys, ...requiredPetKeys]) {
   if (!(key in windowProperties)) {
@@ -57,18 +62,40 @@ for (const key of [...requiredWindowKeys, ...requiredPetKeys]) {
 for (const key of requiredWindowKeys) {
   if (!(key in mainWindow)) fail(`main window missing ${key}`);
   if (!(key in petWindow)) fail(`pet window missing ${key}`);
+  panelWindows.forEach((panelWindow, index) => {
+    if (!(key in panelWindow)) fail(`${panelLabels[index]} panel window missing ${key}`);
+  });
 }
 
 for (const key of requiredPetKeys) {
   if (!(key in petWindow)) fail(`pet window missing ${key}`);
+  panelWindows.forEach((panelWindow, index) => {
+    if (!(key in panelWindow)) fail(`${panelLabels[index]} panel window missing ${key}`);
+  });
 }
 
 if (petWindow.url !== '/?mode=pet') {
   fail('pet window must load /?mode=pet');
 }
 
-if (mainWindow.visible !== false) {
-  fail('main window must be hidden on native startup so only Pet Mode appears');
+panelLabels.forEach((label, index) => {
+  const panelWindow = panelWindows[index];
+  if (panelWindow.url !== `/?panel=${label}`) {
+    fail(`${label} panel window must load /?panel=${label}`);
+  }
+});
+
+if (
+  mainWindow.visible !== true ||
+  mainWindow.width !== 390 ||
+  mainWindow.height !== 575 ||
+  mainWindow.resizable !== false ||
+  mainWindow.decorations !== false ||
+    mainWindow.transparent !== true ||
+  mainWindow.alwaysOnTop !== true ||
+  mainWindow.shadow !== false
+) {
+  fail('main window must launch as a visible 390x575 non-resizable transparent avatar surface');
 }
 
 if (
@@ -76,17 +103,38 @@ if (
   petWindow.transparent !== true ||
   petWindow.alwaysOnTop !== true ||
   petWindow.skipTaskbar !== true ||
-  petWindow.shadow !== false
+  petWindow.shadow !== false ||
+  petWindow.visible !== false
 ) {
-  fail('pet window must be undecorated, transparent, always-on-top, skipped from taskbar, and shadowless');
+  fail('pet window must launch hidden, undecorated, transparent, always-on-top, skipped from taskbar, and shadowless');
 }
 
-if (petWindow.transparent === true && config.app.macOSPrivateApi !== true) {
-  fail('transparent pet window requires app.macOSPrivateApi on macOS');
+panelLabels.forEach((label, index) => {
+  const panelWindow = panelWindows[index];
+  if (
+    panelWindow.decorations !== false ||
+    panelWindow.transparent !== true ||
+    panelWindow.alwaysOnTop !== true ||
+    panelWindow.skipTaskbar !== true ||
+    panelWindow.shadow !== false ||
+    panelWindow.visible !== false
+  ) {
+    fail(`${label} panel window must launch hidden, undecorated, transparent, always-on-top, skipped from taskbar, and shadowless`);
+  }
+});
+
+if (config.app.macOSPrivateApi !== true) {
+  fail('macOSPrivateApi must be enabled for transparent macOS windows');
 }
 
 if (!defaultCapability.permissions?.includes('core:window:allow-start-dragging')) {
   fail('default capability must allow start-dragging for the undecorated pet window');
+}
+
+for (const label of ['main', 'pet', ...panelLabels]) {
+  if (!defaultCapability.windows?.includes(label)) {
+    fail(`default capability must include ${label} window`);
+  }
 }
 
 const requiredCargoFragments = [
@@ -110,6 +158,10 @@ if (!nativeLib.includes('tauri_plugin_opener::init()')) {
   fail('src-tauri/src/lib.rs must install the opener plugin used by the scaffold');
 }
 
+if (!nativeLib.includes('show_panel_window') || !nativeLib.includes('hide_panel_window')) {
+  fail('src-tauri/src/lib.rs must expose panel window show/hide commands');
+}
+
 if (!nativeLib.includes('tauri::generate_context!()')) {
   fail('src-tauri/src/lib.rs must run with generated Tauri context');
 }
@@ -122,4 +174,4 @@ if (!nativeBuild.includes('tauri_build::build()')) {
   fail('src-tauri/build.rs must call tauri_build::build()');
 }
 
-console.log('ok: tauri config and native scaffold match Hermes Guild v0 expectations');
+console.log('ok: tauri config and native scaffold match Hermes companion v0 expectations');

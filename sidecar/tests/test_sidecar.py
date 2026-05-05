@@ -141,6 +141,43 @@ class HermesGuildSidecarTest(unittest.TestCase):
         self.assertEqual(active.body["profile"], {"id": "builder", "name": "Builder Prime"})
         self.assertEqual(active.body["source"], "local-state")
 
+    def test_profile_details_read_default_soul_skills_and_sessions_bounded(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hermes_home = Path(temp_dir)
+            (hermes_home / "SOUL.md").write_text("x" * 5000)
+            skills_dir = hermes_home / "skills"
+            skills_dir.mkdir()
+            (skills_dir / "research.md").write_text("# Research\n")
+            sessions_dir = hermes_home / "sessions"
+            sessions_dir.mkdir()
+            (sessions_dir / "session-1.json").write_text(json.dumps({"title": "Planning chat", "messages": [1, 2]}))
+
+            response = self.make_sidecar(hermes_home).response_for("GET", "/profiles/default/details")
+
+        self.assertEqual(response.status, 200)
+        self.assertTrue(response.body["ok"])
+        self.assertEqual(response.body["profile_id"], "default")
+        self.assertEqual(response.body["path"], str(hermes_home))
+        self.assertLessEqual(len(response.body["soul_md"]["text"]), 4096)
+        self.assertTrue(response.body["soul_md"]["truncated"])
+        self.assertEqual(response.body["skills"]["items"][0]["name"], "research")
+        self.assertEqual(response.body["sessions"]["items"][0]["title"], "Planning chat")
+        self.assertEqual(response.body["sessions"]["items"][0]["message_count"], 2)
+
+    def test_profile_details_resolves_named_profile_home_and_missing_sections(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            hermes_home = Path(temp_dir)
+            profile_home = hermes_home / "profiles" / "frieren"
+            profile_home.mkdir(parents=True)
+
+            response = self.make_sidecar(hermes_home).response_for("GET", "/profiles/frieren/details?name=frieren")
+
+        self.assertEqual(response.status, 200)
+        self.assertEqual(response.body["profile_id"], "frieren")
+        self.assertEqual(response.body["path"], str(profile_home))
+        self.assertEqual(response.body["soul_md"]["source"], "unavailable")
+        self.assertIn("SOUL.md", response.body["soul_md"]["unavailable_reason"])
+
     def test_profiles_prefer_verified_cli_list_when_available(self):
         cli_output = """
  Profile          Model                        Gateway      Alias

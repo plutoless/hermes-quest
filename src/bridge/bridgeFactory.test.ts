@@ -4,6 +4,7 @@ import type {
   BridgeConfig,
   HermesApiClient,
   HermesDashboardApiClient,
+  HermesProfileDetailsClient,
   HermesProfileClient,
   HermesProfileRunClient,
   HermesSidecarClient,
@@ -122,6 +123,22 @@ function profileClient(input: Partial<Awaited<ReturnType<HermesProfileClient['li
   };
 }
 
+function profileDetailsClient(): HermesProfileDetailsClient {
+  return {
+    getProfileDetails: async (profile) => ({
+      ok: true,
+      profileId: profile.id,
+      profileName: profile.name,
+      source: profile.source ?? 'cli',
+      path: `/Users/example/.hermes/profiles/${profile.name}`,
+      soulMd: { source: 'local-state', text: `SOUL for ${profile.name}` },
+      skills: { source: 'local-state', items: [] },
+      sessions: { source: 'local-state', items: [] },
+      loadedAt: '2026-05-05T00:00:00.000Z',
+    }),
+  };
+}
+
 describe('bridgeFactory', () => {
   beforeEach(() => {
     installFakeStorage();
@@ -236,6 +253,34 @@ describe('bridgeFactory', () => {
     expect(status.dataSources?.skills).toBe('unavailable');
     expect(status.warnings).toContain('Hermes dashboard protected REST skipped: session token unavailable.');
     expect(status.logsSummary).toContain('Bridge mode: auto');
+  });
+
+  test('real bridge exposes profile details without protected dashboard dependency', async () => {
+    let dashboardInventoryCalls = 0;
+    const dashboard = dashboardClient({ ok: true, message: 'Dashboard API healthy' });
+    dashboard.listSkills = async () => {
+      dashboardInventoryCalls += 1;
+      return { ok: true, status: 200, data: {} };
+    };
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient: {
+        checkHealth: async () => ({ ok: true, message: 'Gateway API healthy' }),
+        runTask: async () => ({ ok: true, output: 'real output', events: [] }),
+      },
+      dashboardClient: dashboard,
+      profileClient: profileClient({
+        profiles: [{ id: 'frieren', name: 'frieren', source: 'cli' }],
+        activeProfileId: 'frieren',
+        source: 'cli',
+      }),
+      profileDetailsClient: profileDetailsClient(),
+    });
+
+    const details = await bridge.getProfileDetails?.('frieren');
+
+    expect(details?.profileName).toBe('frieren');
+    expect(details?.soulMd.text).toBe('SOUL for frieren');
+    expect(dashboardInventoryCalls).toBe(0);
   });
 
   test('auto mode keeps real gateway active when dashboard compatibility is unavailable', async () => {

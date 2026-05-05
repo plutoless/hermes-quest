@@ -10,6 +10,7 @@ import type {
   Skill,
   Task,
   TimelineEvent,
+  ProfileDetails,
 } from '../types';
 import type {
   BridgeConfig,
@@ -20,6 +21,7 @@ import type {
   HermesProfileListResult,
   HermesProfileMetadata,
   HermesProfileRunClient,
+  HermesProfileDetailsClient,
   HermesSidecarClient,
   Listener,
 } from './types';
@@ -139,9 +141,12 @@ export class RealHermesBridge implements HermesBridgeApi {
     private readonly apiClient: HermesApiClient,
     private readonly sidecarClient?: HermesSidecarClient,
     private readonly profileRunClient?: HermesProfileRunClient,
+    private readonly profileDetailsClient?: HermesProfileDetailsClient,
   ) {
     this.snapshot = seedSnapshot(config);
   }
+
+  private readonly profileDetailsCache = new Map<string, ProfileDetails>();
 
   getSnapshot(): BridgeSnapshot {
     return structuredClone(this.snapshot);
@@ -432,6 +437,28 @@ export class RealHermesBridge implements HermesBridgeApi {
 
   async getActiveAgent() {
     return this.snapshot.agents.find((agent) => agent.id === this.snapshot.activeProfileId) ?? this.snapshot.agents[0];
+  }
+
+  async getProfileDetails(profileId: string) {
+    const agent = this.snapshot.agents.find((item) => item.id === profileId);
+    if (!agent) return unavailableProfileDetails(profileId, profileId, 'Unknown Hermes profile.');
+    const cached = this.profileDetailsCache.get(profileId);
+    if (cached) return structuredClone(cached);
+    if (!this.profileDetailsClient) {
+      return unavailableProfileDetails(agent.id, agent.name, 'Profile detail reader is unavailable in this runtime.');
+    }
+    const details = await this.profileDetailsClient.getProfileDetails({
+      id: agent.id,
+      name: agent.name,
+      source: agent.source,
+      role: agent.role,
+      active: agent.activeInPet,
+      model: agent.equipment.find((item) => item.startsWith('Model: '))?.replace(/^Model:\s*/, ''),
+      executionRouting: agent.executionRouting,
+      unavailableReason: agent.unavailableReason,
+    });
+    this.profileDetailsCache.set(profileId, structuredClone(details));
+    return details;
   }
 
   createTask(input: CreateTaskInput) {
@@ -1207,6 +1234,20 @@ function collectionFromPayload(payload: unknown, keys: string[]) {
 
 function stringField(value: unknown) {
   return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function unavailableProfileDetails(profileId: string, profileName: string, reason: string): ProfileDetails {
+  return {
+    ok: false,
+    profileId,
+    profileName,
+    source: 'unavailable',
+    soulMd: { source: 'unavailable', text: '', unavailableReason: reason },
+    skills: { source: 'unavailable', items: [], unavailableReason: reason },
+    sessions: { source: 'unavailable', items: [], unavailableReason: reason },
+    loadedAt: new Date().toISOString(),
+    unavailableReason: reason,
+  };
 }
 
 function slugFromName(name: string) {

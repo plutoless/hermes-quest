@@ -1,9 +1,17 @@
 use serde::Serialize;
-use serde_json::Value;
-use std::{process::Command, thread, time::Duration};
+use serde_json::{json, Value};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+    thread,
+    time::{Duration, UNIX_EPOCH},
+};
 #[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
+
+const PANEL_WINDOWS: [&str; 3] = ["appearance", "companions", "settings"];
 
 #[derive(Debug, Serialize)]
 struct HermesApiResponse {
@@ -108,6 +116,201 @@ async fn hermes_profile_run(
     })
 }
 
+#[tauri::command]
+async fn hermes_profile_details(profile_id: String, profile_name: String) -> Result<Value, String> {
+    let hermes_home = std::env::var("HERMES_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+            PathBuf::from(home).join(".hermes")
+        });
+    let profile_home = resolve_profile_home(&hermes_home, &profile_id, &profile_name);
+    Ok(profile_details_payload(
+        &profile_home,
+        &profile_id,
+        &profile_name,
+    ))
+}
+
+fn resolve_profile_home(hermes_home: &Path, profile_id: &str, profile_name: &str) -> PathBuf {
+    let key = if profile_name.trim().is_empty() {
+        profile_id.trim()
+    } else {
+        profile_name.trim()
+    };
+    if key == "default" || profile_id.trim() == "default" {
+        return hermes_home.to_path_buf();
+    }
+    hermes_home.join("profiles").join(key)
+}
+
+fn profile_details_payload(profile_home: &Path, profile_id: &str, profile_name: &str) -> Value {
+    const MAX_TEXT_BYTES: usize = 4096;
+    let soul_path = profile_home.join("SOUL.md");
+    let (soul_text, soul_truncated) = read_text_bounded(&soul_path, MAX_TEXT_BYTES);
+    json!({
+        "ok": true,
+        "profile_id": profile_id,
+        "profile_name": profile_name,
+        "source": if profile_home.exists() { "local-state" } else { "unavailable" },
+        "path": profile_home.to_string_lossy(),
+        "loaded_at": now_millis_string(),
+        "soul_md": {
+            "source": if soul_path.is_file() { "local-state" } else { "unavailable" },
+            "path": soul_path.to_string_lossy(),
+            "text": soul_text,
+            "truncated": soul_truncated,
+            "unavailable_reason": if soul_path.is_file() { Value::Null } else { json!("SOUL.md not found for this profile.") },
+        },
+        "skills": directory_items_section(&profile_home.join("skills"), 50, "Profile skills directory not found."),
+        "sessions": sessions_section(&profile_home.join("sessions")),
+    })
+}
+
+fn read_text_bounded(path: &Path, max_bytes: usize) -> (String, bool) {
+    let Ok(bytes) = fs::read(path) else {
+        return (String::new(), false);
+    };
+    let truncated = bytes.len() > max_bytes;
+    let bounded = &bytes[..bytes.len().min(max_bytes)];
+    (String::from_utf8_lossy(bounded).to_string(), truncated)
+}
+
+fn directory_items_section(path: &Path, limit: usize, unavailable_reason: &str) -> Value {
+    let Ok(entries) = fs::read_dir(path) else {
+        return json!({
+            "source": "unavailable",
+            "path": path.to_string_lossy(),
+            "items": [],
+            "unavailable_reason": unavailable_reason,
+        });
+    };
+    let mut items = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file() || entry.path().is_dir())
+        .map(|entry| {
+            let path = entry.path();
+            let name = if path.is_file() {
+                path.file_stem()
+            } else {
+                path.file_name()
+            }
+            .and_then(|value| value.to_str())
+            .unwrap_or("skill")
+            .to_string();
+            json!({
+                "id": slug_from_name(&name),
+                "name": name,
+                "source": "local-state",
+                "path": path.to_string_lossy(),
+            })
+        })
+        .collect::<Vec<_>>();
+    items.sort_by_key(|item| item["name"].as_str().unwrap_or("").to_string());
+    items.truncate(limit);
+    json!({ "source": "local-state", "path": path.to_string_lossy(), "items": items })
+}
+
+fn sessions_section(path: &Path) -> Value {
+    let Ok(entries) = fs::read_dir(path) else {
+        return json!({
+            "source": "unavailable",
+            "path": path.to_string_lossy(),
+            "items": [],
+            "unavailable_reason": "Profile sessions directory not found.",
+        });
+    };
+    let mut entries = entries
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().is_file())
+        .collect::<Vec<_>>();
+    entries.sort_by_key(|entry| {
+        entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| std::cmp::Reverse(duration.as_secs()))
+    });
+    let items = entries
+        .into_iter()
+        .take(25)
+        .map(|entry| {
+            let path = entry.path();
+            let id = path.file_stem().and_then(|value| value.to_str()).unwrap_or("session").to_string();
+            let metadata = session_metadata(&path);
+            json!({
+                "id": id,
+                "title": metadata.get("title").and_then(Value::as_str).unwrap_or_else(|| path.file_stem().and_then(|value| value.to_str()).unwrap_or("session")),
+                "source": "local-state",
+                "path": path.to_string_lossy(),
+                "updated_at": modified_millis_string(&path),
+                "message_count": metadata.get("message_count").cloned().unwrap_or(Value::Null),
+            })
+        })
+        .collect::<Vec<_>>();
+    json!({ "source": "local-state", "path": path.to_string_lossy(), "items": items })
+}
+
+fn session_metadata(path: &Path) -> Value {
+    if path.extension().and_then(|value| value.to_str()) != Some("json") {
+        return json!({});
+    }
+    let (text, _) = read_text_bounded(path, 4096);
+    let Ok(payload) = serde_json::from_str::<Value>(&text) else {
+        return json!({});
+    };
+    let title = payload
+        .get("title")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("name").and_then(Value::as_str));
+    let message_count = payload
+        .get("messages")
+        .and_then(Value::as_array)
+        .map(|messages| messages.len());
+    json!({
+        "title": title,
+        "message_count": message_count,
+    })
+}
+
+fn modified_millis_string(path: &Path) -> String {
+    path.metadata()
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis().to_string())
+        .unwrap_or_else(|| "0".to_string())
+}
+
+fn now_millis_string() -> String {
+    std::time::SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis().to_string())
+        .unwrap_or_else(|_| "0".to_string())
+}
+
+fn slug_from_name(name: &str) -> String {
+    let slug = name
+        .trim()
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-') {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('-')
+        .to_string();
+    if slug.is_empty() {
+        "item".to_string()
+    } else {
+        slug
+    }
+}
+
 fn with_optional_json(
     builder: reqwest::RequestBuilder,
     body: Option<Value>,
@@ -153,6 +356,44 @@ fn show_pet(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+fn is_panel_window(label: &str) -> bool {
+    PANEL_WINDOWS.contains(&label)
+}
+
+fn show_panel(app: &AppHandle, panel: &str) -> Result<(), String> {
+    if !is_panel_window(panel) {
+        return Err(format!("Unsupported Hermes panel window: {panel}"));
+    }
+
+    let panel_window = app
+        .get_webview_window(panel)
+        .ok_or_else(|| format!("{panel} window is unavailable"))?;
+    panel_window
+        .show()
+        .map_err(|error| format!("Failed to show {panel} window: {error}"))?;
+    panel_window
+        .unminimize()
+        .map_err(|error| format!("Failed to unminimize {panel} window: {error}"))?;
+    panel_window
+        .set_focus()
+        .map_err(|error| format!("Failed to focus {panel} window: {error}"))?;
+
+    Ok(())
+}
+
+fn hide_panel(app: &AppHandle, panel: &str) -> Result<(), String> {
+    if !is_panel_window(panel) {
+        return Err(format!("Unsupported Hermes panel window: {panel}"));
+    }
+
+    let panel_window = app
+        .get_webview_window(panel)
+        .ok_or_else(|| format!("{panel} window is unavailable"))?;
+    panel_window
+        .hide()
+        .map_err(|error| format!("Failed to hide {panel} window: {error}"))
+}
+
 #[tauri::command]
 async fn show_hall_window(app: AppHandle) -> Result<(), String> {
     show_hall(&app)
@@ -161,6 +402,16 @@ async fn show_hall_window(app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 async fn show_pet_window(app: AppHandle) -> Result<(), String> {
     show_pet(&app)
+}
+
+#[tauri::command]
+async fn show_panel_window(app: AppHandle, panel: String) -> Result<(), String> {
+    show_panel(&app, &panel)
+}
+
+#[tauri::command]
+async fn hide_panel_window(app: AppHandle, panel: String) -> Result<(), String> {
+    hide_panel(&app, &panel)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -172,8 +423,8 @@ pub fn run() {
 
             #[cfg(desktop)]
             {
-                let mut tray = TrayIconBuilder::with_id("hermes-guild")
-                    .tooltip("Hermes Guild")
+                let mut tray = TrayIconBuilder::with_id("hermes")
+                    .tooltip("Hermes")
                     .show_menu_on_left_click(false)
                     .on_tray_icon_event(|tray, event| {
                         let should_open_hall = matches!(
@@ -219,10 +470,21 @@ pub fn run() {
             hermes_profile_list,
             hermes_profile_route_status,
             hermes_profile_run,
+            hermes_profile_details,
             show_hall_window,
-            show_pet_window
+            show_pet_window,
+            show_panel_window,
+            hide_panel_window
         ])
         .on_window_event(|window, event| {
+            if is_panel_window(window.label()) {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+                return;
+            }
+
             if window.label() != "main" {
                 return;
             }
@@ -233,7 +495,7 @@ pub fn run() {
             }
         })
         .build(tauri::generate_context!())
-        .expect("error while building Hermes Guild");
+        .expect("error while building Hermes");
 
     app.run(|app_handle, event| {
         if matches!(event, RunEvent::Reopen { .. }) {

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Hermes Guild",
+  "productName": "Hermes",
   "version": "0.1.0",
   "identifier": "quest.hermes.guild",
   "build": {
@@ -14,12 +14,15 @@
     "windows": [
       {
         "label": "main",
-        "title": "Hermes Guild",
-        "width": 1280,
-        "height": 820,
-        "resizable": true,
-        "decorations": true,
-        "visible": false
+        "title": "Hermes",
+        "width": 390,
+        "height": 575,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "shadow": false,
+        "visible": true
       },
       {
         "label": "pet",
@@ -32,7 +35,50 @@
         "transparent": true,
         "alwaysOnTop": true,
         "skipTaskbar": true,
-        "shadow": false
+        "shadow": false,
+        "visible": false
+      },
+      {
+        "label": "appearance",
+        "title": "Hermes Appearance",
+        "url": "/?panel=appearance",
+        "width": 500,
+        "height": 860,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false
+      },
+      {
+        "label": "companions",
+        "title": "Hermes Companions",
+        "url": "/?panel=companions",
+        "width": 340,
+        "height": 370,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false
+      },
+      {
+        "label": "settings",
+        "title": "Hermes Settings",
+        "url": "/?panel=settings",
+        "width": 340,
+        "height": 520,
+        "resizable": false,
+        "decorations": false,
+        "transparent": true,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "visible": false
       }
     ]
   }

@@ -168,6 +168,44 @@ class MockHermesBridge {
     this.emit(makeEvent('active_profile_changed', agentId));
   }
 
+  async getProfileDetails(profileId: string) {
+    const agent = this.snapshot.agents.find((item) => item.id === profileId);
+    if (!agent) {
+      return {
+        ok: false,
+        profileId,
+        profileName: profileId,
+        source: 'unavailable' as const,
+        soulMd: { source: 'unavailable' as const, text: '', unavailableReason: 'Unknown mock profile.' },
+        skills: { source: 'unavailable' as const, items: [], unavailableReason: 'Unknown mock profile.' },
+        sessions: { source: 'unavailable' as const, items: [], unavailableReason: 'Unknown mock profile.' },
+        loadedAt: now(),
+        unavailableReason: 'Unknown mock profile.',
+      };
+    }
+    return {
+      ok: true,
+      profileId: agent.id,
+      profileName: agent.name,
+      source: 'mock-fallback' as const,
+      path: 'explicit mock bridge',
+      soulMd: {
+        source: 'mock-fallback' as const,
+        text: 'Explicit mock mode profile details. Real Hermes profile files are not read in mock mode.',
+      },
+      skills: {
+        source: 'mock-fallback' as const,
+        items: agent.skills.map((skill) => ({ ...skill, source: 'mock-fallback' as const })),
+      },
+      sessions: {
+        source: 'mock-fallback' as const,
+        items: [],
+        unavailableReason: 'Mock mode does not expose real Hermes sessions.',
+      },
+      loadedAt: now(),
+    };
+  }
+
   createTask(input: CreateTaskInput) {
     if (!this.hasAgent(input.assigneeId)) {
       throw new Error(`Unknown assignee ${input.assigneeId}`);

@@ -18,10 +18,11 @@ import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 
 SIDECAR_VERSION = "0.1.0"
@@ -71,6 +72,9 @@ class HermesGuildSidecar:
             return JsonResponse(200, self.capabilities())
         if method == "GET" and parsed_path == "/profiles":
             return JsonResponse(200, self.profiles())
+        profile_details_response = self._profile_details_response_for(method, path)
+        if profile_details_response:
+            return profile_details_response
         if method == "GET" and parsed_path == "/active-profile":
             return JsonResponse(200, self.active_profile())
         if method == "GET" and parsed_path == "/local-state/summary":
@@ -80,6 +84,17 @@ class HermesGuildSidecar:
             return run_response
 
         return JsonResponse(404, {"ok": False, "error": "not_found", "path": parsed_path})
+
+    def _profile_details_response_for(self, method: str, path: str) -> Optional[JsonResponse]:
+        parsed = urlparse(path)
+        parsed_path = parsed.path.rstrip("/") or "/"
+        parts = [part for part in parsed_path.split("/") if part]
+        if method != "GET" or len(parts) != 3 or parts[0] != "profiles" or parts[2] != "details":
+            return None
+        profile_id = unquote(parts[1])
+        query = parse_qs(parsed.query)
+        profile_name = query.get("name", [profile_id])[0]
+        return JsonResponse(200, profile_details(self.config.hermes_home, profile_id, profile_name))
 
     def health(self) -> Dict[str, Any]:
         public_rest = self._gateway_status()
@@ -353,6 +368,98 @@ def read_profiles(hermes_home: Path) -> list[Dict[str, str]]:
     return profiles
 
 
+def profile_details(hermes_home: Path, profile_id: str, profile_name: str) -> Dict[str, Any]:
+    profile_home = resolve_profile_home(hermes_home, profile_id, profile_name)
+    soul_path = profile_home / "SOUL.md"
+    soul_text = read_text_bounded(soul_path)
+    return {
+        "ok": True,
+        "profile_id": profile_id,
+        "profile_name": profile_name,
+        "source": "local-state" if profile_home.exists() else "unavailable",
+        "path": str(profile_home),
+        "loaded_at": iso_now(),
+        "soul_md": {
+            "source": "local-state" if soul_path.is_file() else "unavailable",
+            "path": str(soul_path),
+            "text": soul_text,
+            "truncated": soul_path.is_file() and soul_path.stat().st_size > MAX_TEXT_BYTES,
+            "unavailable_reason": None if soul_path.is_file() else "SOUL.md not found for this profile.",
+        },
+        "skills": profile_skills_summary(profile_home / "skills"),
+        "sessions": profile_sessions_summary(profile_home / "sessions"),
+    }
+
+
+def resolve_profile_home(hermes_home: Path, profile_id: str, profile_name: str) -> Path:
+    key = profile_name or profile_id
+    if key == "default" or profile_id == "default":
+        return hermes_home
+    return hermes_home / "profiles" / key
+
+
+def profile_skills_summary(skills_dir: Path) -> Dict[str, Any]:
+    if not skills_dir.is_dir():
+        return {
+            "source": "unavailable",
+            "path": str(skills_dir),
+            "items": [],
+            "unavailable_reason": "Profile skills directory not found.",
+        }
+    items = []
+    for path in sorted(safe_iterdir(skills_dir))[:50]:
+        if not path.is_file() and not path.is_dir():
+            continue
+        name = path.stem if path.is_file() else path.name
+        items.append({
+            "id": slug_from_name(name),
+            "name": name,
+            "source": "local-state",
+            "path": str(path),
+        })
+    return {"source": "local-state", "path": str(skills_dir), "items": items}
+
+
+def profile_sessions_summary(sessions_dir: Path) -> Dict[str, Any]:
+    if not sessions_dir.is_dir():
+        return {
+            "source": "unavailable",
+            "path": str(sessions_dir),
+            "items": [],
+            "unavailable_reason": "Profile sessions directory not found.",
+        }
+    items = []
+    for path in sorted(safe_iterdir(sessions_dir), key=lambda item: item.stat().st_mtime if item.exists() else 0, reverse=True)[:25]:
+        if not path.is_file():
+            continue
+        metadata = session_metadata(path)
+        items.append({
+            "id": path.stem,
+            "title": metadata.get("title") or path.stem,
+            "source": "local-state",
+            "path": str(path),
+            "updated_at": iso_from_timestamp(path.stat().st_mtime),
+            "message_count": metadata.get("message_count"),
+        })
+    return {"source": "local-state", "path": str(sessions_dir), "items": items}
+
+
+def session_metadata(path: Path) -> Dict[str, Any]:
+    if path.suffix.lower() != ".json":
+        return {}
+    try:
+        payload = json.loads(read_text_bounded(path))
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    messages = payload.get("messages")
+    return {
+        "title": string_value(payload.get("title")) or string_value(payload.get("name")),
+        "message_count": len(messages) if isinstance(messages, list) else None,
+    }
+
+
 def read_profiles_from_cli(check_cli: bool) -> Dict[str, Any]:
     if not check_cli:
         return {"profiles": [], "active_profile_id": None}
@@ -505,6 +612,14 @@ def read_text_bounded(path: Path) -> str:
         return ""
     with path.open("rb") as handle:
         return handle.read(MAX_TEXT_BYTES).decode("utf-8", errors="replace")
+
+
+def iso_now() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def iso_from_timestamp(timestamp: float) -> str:
+    return datetime.fromtimestamp(timestamp, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def latest_file(path: Path) -> Optional[Path]:

@@ -1,1884 +1,996 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { FormEvent, MouseEvent, PointerEvent } from 'react';
+import type { CSSProperties, FormEvent, MouseEvent, PointerEvent } from 'react';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
-  Hammer,
-  Search,
-  ShieldCheck,
+  Bell,
+  ChevronRight,
+  Edit3,
+  Eye,
+  Feather,
+  Grid2X2,
+  Hand,
+  Image as ImageIcon,
+  MessageCircle,
+  Moon,
+  Plus,
+  Send,
+  Settings,
+  Shield,
+  Sparkles,
+  Upload,
+  UserRound,
+  WifiOff,
+  X,
 } from 'lucide-react';
 import { useBridgeSnapshot } from './hooks/useBridgeSnapshot';
-import {
-  PixelAppWindow,
-  PixelAvatar,
-  PixelBadge,
-  PixelButton,
-  PixelChip,
-  PixelCommandBar,
-  PixelIcon,
-  PixelInput,
-  PixelLogList,
-  PixelMascot,
-  PixelPanel,
-  PixelQuestCard,
-  PixelReviewCard,
-  PixelSelect,
-  PixelTruthStrip,
-} from './ui/pixel';
-import type { BridgeConfig, BridgeMode } from './bridge/types';
-import type { Agent, ReportCard, SystemStatus, Task, TimelineEvent } from './types';
+import type {
+  AnimationState,
+  AppearanceSource,
+  AppSettings,
+  ChatMessage,
+  ChatProvider,
+  Companion,
+  CompanionAppearance,
+  CompanionStatus,
+} from './types';
+import type { HermesBridgeApi } from './bridge/types';
+import type { BridgeMode } from './bridge/types';
 
-const isPetWindowMode = () => new URLSearchParams(window.location.search).get('mode') === 'pet';
-const isPixelShowcaseMode = () => window.location.pathname === '/pixel-ui-showcase';
-const variantStorageKey = 'hermes-guild.jrpg-variant';
-const petHandoffStorageKey = 'hermes-guild.pet-handoff';
-type MainView = 'hall' | 'board' | 'review';
+const companionStateStorageKey = 'hermes-desktop.companion-state.v0';
+const hermesCharacterUrl = new URL('./assets/hermes-character.png', import.meta.url).href;
 
-const uiVariants = [
-  {
-    id: 'royal-guild-hall',
-    number: '01',
-    name: 'Royal Guild Hall',
-    className: 'variant-royal',
-    preview: 'Classic heroic guild headquarters with noble parchment panels.',
-  },
-  {
-    id: 'magitech-workshop',
-    number: '02',
-    name: 'Magitech Workshop',
-    className: 'variant-magitech',
-    preview: 'Arcane machine console with blueprint grids and rune-tech diagnostics.',
-  },
-  {
-    id: 'moon-crystal-sanctuary',
-    number: '03',
-    name: 'Moon Crystal Sanctuary',
-    className: 'variant-sanctuary',
-    preview: 'Quiet moonlit temple with crystal frames and ceremonial review surfaces.',
-  },
-  {
-    id: 'skyship-command-deck',
-    number: '04',
-    name: 'Skyship Command Deck',
-    className: 'variant-skyship',
-    preview: 'Low-density companion workbench with one active quest and a compact review log.',
-  },
-  {
-    id: 'arcane-archive-library',
-    number: '05',
-    name: 'Arcane Archive Library',
-    className: 'variant-archive',
-    preview: 'Scholar guild ledgers, book panels, and annotated archive reports.',
-  },
-  {
-    id: 'mercenary-camp',
-    number: '06',
-    name: 'Mercenary Camp',
-    className: 'variant-camp',
-    preview: 'Frontier outpost with notice-board quests and stamped field reports.',
-  },
-  {
-    id: 'dungeon-strategy-terminal',
-    number: '07',
-    name: 'Dungeon Strategy Terminal',
-    className: 'variant-dungeon',
-    preview: 'Tactical dungeon console with grid-heavy logs and mission-clear results.',
-  },
-  {
-    id: 'cozy-inn-guild',
-    number: '08',
-    name: 'Cozy Inn Guild',
-    className: 'variant-inn',
-    preview: 'Warm town inn guild base with soft ledgers and companion-forward pet mode.',
-  },
-] as const;
+type ProviderMode = 'mock' | 'hermes';
+type PanelWindow = 'appearance' | 'companions' | 'settings';
+type CompanionEvent = 'click' | 'send' | 'response' | 'timeout' | 'error';
 
-type VariantId = (typeof uiVariants)[number]['id'];
-
-function isVariantId(value: string | null): value is VariantId {
-  return uiVariants.some((variant) => variant.id === value);
+interface CompanionRuntimeState {
+  companions: Companion[];
+  appearances: CompanionAppearance[];
+  selectedCompanionId: string;
+  settings: AppSettings;
 }
 
-function getInitialVariant(): VariantId {
-  const params = new URLSearchParams(window.location.search);
-  const queryVariant = params.get('variant');
-  if (isVariantId(queryVariant)) return queryVariant;
-
-  const storedVariant = window.localStorage.getItem(variantStorageKey);
-  if (isVariantId(storedVariant)) return storedVariant;
-
-  return 'skyship-command-deck';
+interface CompanionChatProviderOptions {
+  mode: ProviderMode;
+  bridge?: HermesBridgeApi;
+  waitTimeoutMs?: number;
+  pollIntervalMs?: number;
 }
 
-function getInitialView(): MainView {
-  const queryView = new URLSearchParams(window.location.search).get('view');
-  if (queryView === 'board' || queryView === 'review') return queryView;
-  return 'hall';
-}
-
-function persistVariant(variantId: VariantId) {
-  window.localStorage.setItem(variantStorageKey, variantId);
-  const url = new URL(window.location.href);
-  url.searchParams.set('variant', variantId);
-  window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-}
-
-async function focusGuildHallWindow() {
-  if (!('__TAURI_INTERNALS__' in window)) return false;
-
-  const { invoke } = await import('@tauri-apps/api/core');
-  await invoke('show_hall_window');
-  return true;
-}
-
-async function focusGuildHallWindowWithWebviewFallback() {
-  if (!('__TAURI_INTERNALS__' in window)) return false;
-
-  const { WebviewWindow } = await import('@tauri-apps/api/webviewWindow');
-  const mainWindow = await WebviewWindow.getByLabel('main');
-  if (!mainWindow) return false;
-
-  await mainWindow.show();
-  await mainWindow.unminimize();
-  await mainWindow.setFocus();
-  return true;
-}
-
-async function startPetWindowDrag() {
-  if (!('__TAURI_INTERNALS__' in window) || !isPetWindowMode()) return;
-
-  const { getCurrentWindow } = await import('@tauri-apps/api/window');
-  await getCurrentWindow().startDragging();
-}
-
-function writePetHandoff(view: MainView, taskId?: string) {
-  window.localStorage.setItem(petHandoffStorageKey, JSON.stringify({ view, taskId, timestamp: Date.now() }));
-}
-
-const statusLabel: Record<string, string> = {
-  idle: 'Idle',
-  thinking: 'Thinking',
-  running: 'Running',
-  blocked: 'Blocked',
-  needs_review: 'Needs Review',
-  error: 'Error',
-  created: 'Created',
-  assigned: 'Assigned',
-  approved: 'Approved',
+const companionSubtitles: Record<string, string> = {
+  hermes: 'Your digital concierge',
+  astra: 'Productivity analyst',
+  orion: 'Research specialist',
 };
 
-const viewTitle = {
-  hall: 'Guild Hall',
-  board: 'Quest Board',
-  review: 'Review Chamber',
-};
-
-const roleIcon = {
-  Researcher: Search,
-  Builder: Hammer,
-  Reviewer: ShieldCheck,
-};
-
-const isActionableReportTask = (task: Task | undefined) => task?.state === 'needs_review' && task.reviewStatus === 'required';
-
-const questLogLabel: Record<string, string> = {
-  created: 'Quest posted',
-  assigned: 'Assigned to character',
-  started: 'Expedition started',
-  progress: 'Field note',
-  blocked: 'Route blocked',
-  artifact: 'Artifact found',
-  completed: 'Quest completed',
-  review_required: 'Returned to Guild',
-  approved: 'Quest accepted',
-  revision_requested: 'Revision ordered',
-  error: 'Quest failed',
-};
-
-const petStateCopy = {
-  idle: {
-    label: 'Ready',
-    message: 'Ready for a quest.',
-  },
-  thinking: {
-    label: 'Thinking',
-    message: 'Thinking...',
-  },
-  running: {
-    label: 'Running',
-    message: 'Working on your quest.',
-  },
-  needs_review: {
-    label: 'Review',
-    message: 'A quest is ready.',
-  },
-  error: {
-    label: 'Attention',
-    message: 'Something needs attention.',
-  },
-};
-
-function getExecutionSource(status: SystemStatus) {
-  if (status.activeImplementation === 'real') return 'Real Hermes API';
-  if (status.bridgeMode === 'auto' && status.activeImplementation === 'mock') return 'Mock fallback';
-  if (status.activeImplementation === 'loading') return 'Bridge loading';
-  return 'Mock bridge';
+function getPanelWindow(): PanelWindow | null {
+  if (typeof window === 'undefined') return null;
+  const panel = new URLSearchParams(window.location.search).get('panel');
+  return panel === 'appearance' || panel === 'companions' || panel === 'settings' ? panel : null;
 }
 
-function getProfileSource(status: SystemStatus, agent?: Agent) {
-  if (status.activeImplementation === 'real') {
-    const source = agent?.source ?? status.dataSources?.activeProfile ?? status.dataSources?.profiles ?? 'unavailable';
-    if (source === 'unavailable' || agent?.name === 'Profile unavailable') return 'Profile unavailable';
-    return `${source} profile metadata`;
+async function showPanelWindow(panel: PanelWindow) {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('show_panel_window', { panel });
+    return;
   }
-  if (status.activeImplementation === 'loading') return 'Bridge loading';
-  return status.bridgeMode === 'auto' ? 'Mock fallback roles' : 'Mock role presets';
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('panel', panel);
+  url.searchParams.delete('mode');
+  window.open(`${url.pathname}${url.search}${url.hash}`, `hermes-${panel}`, 'popup,width=520,height=640');
 }
 
-function getProfileRoutingLabel(status: SystemStatus, agent?: Agent) {
-  if (status.activeImplementation !== 'real') return getExecutionSource(status);
-  if (agent?.executionRouting === 'supported') return 'Selected profile routing verified';
-  return status.operationalData?.profileRoutingSummary ?? 'Profile routing unavailable';
+async function hidePanelWindow(panel: PanelWindow) {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('hide_panel_window', { panel });
+    return;
+  }
+
+  window.close();
 }
 
-export function getOperationalStatusRows(status: SystemStatus) {
-  const rows = [
-    { label: 'Sessions', value: status.operationalData?.sessionsSummary, source: status.dataSources?.sessions },
-    { label: 'Session messages', value: status.operationalData?.sessionMessagesSummary, source: status.dataSources?.sessionMessages },
-    { label: 'Logs', value: status.operationalData?.logsSummary, source: status.dataSources?.logs },
-    { label: 'Analytics', value: status.operationalData?.analyticsSummary, source: status.dataSources?.analytics },
-    { label: 'Cron', value: status.operationalData?.cronSummary, source: status.dataSources?.cronJobs },
-    { label: 'Config', value: status.operationalData?.configSummary, source: status.dataSources?.config },
-    { label: 'Env', value: status.operationalData?.envSummary, source: status.dataSources?.env },
-    { label: 'Gateway jobs', value: status.operationalData?.gatewayJobsSummary, source: status.dataSources?.gatewayJobs },
-    { label: 'Profiles', value: status.operationalData?.profileSummary, source: status.dataSources?.profiles },
-    { label: 'Active profile', value: status.operationalData?.activeProfileSummary, source: status.dataSources?.activeProfile },
-    { label: 'Profile routing', value: status.operationalData?.profileRoutingSummary, source: status.dataSources?.profileRouting },
-    { label: 'Sidecar', value: status.operationalData?.sidecarSummary, source: status.dataSources?.localStateSummary },
-  ];
-  return rows
-    .filter((row) => Boolean(row.value && row.source && (row.source !== 'unavailable' || row.label === 'Profile routing')))
-    .map((row) => ({ label: row.label, value: row.value ?? '', source: row.source ?? 'unavailable' }));
+function startNativeWindowDrag() {
+  if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return false;
+  void getCurrentWindow().startDragging();
+  return true;
+}
+
+function handleNativeDragPointerDown(event: PointerEvent<HTMLElement>) {
+  if (event.button !== 0) return;
+  const target = event.target as HTMLElement;
+  if (target.closest('button, input, textarea, select, a')) return;
+  if (startNativeWindowDrag()) {
+    event.preventDefault();
+  }
+}
+
+const animationLabels: Array<{ id: AnimationState; label: string; icon: typeof Feather }> = [
+  { id: 'idle', label: 'Idle', icon: Feather },
+  { id: 'talk', label: 'Talk', icon: MessageCircle },
+  { id: 'think', label: 'Think', icon: Sparkles },
+  { id: 'wave', label: 'Wave', icon: Hand },
+];
+
+const mockResponses = [
+  "I'm here.",
+  'What would you like to work on?',
+  'I can stay on your desktop while you work.',
+  'Got it. I can help with that.',
+];
+
+export function addCompanion(state: CompanionRuntimeState): CompanionRuntimeState {
+  const next = cloneCompanionState(state);
+  const nextNumber = next.companions.length + 1;
+  const id = `companion-${nextNumber}`;
+  next.companions.push({
+    id,
+    name: `Companion ${nextNumber}`,
+    description: 'Desktop companion',
+    visible: true,
+    status: 'idle',
+    appearanceId: next.appearances[0]?.id ?? 'hermes-default',
+    position: { x: 50, y: 54 },
+    scale: 1,
+    behavior: {
+      allowDrag: next.settings.allowDragging,
+      showSpeechBubbles: next.settings.showSpeechBubbles,
+      clickThrough: next.settings.clickThrough,
+    },
+    agent: { provider: 'mock', model: 'local companion mode' },
+  });
+  next.selectedCompanionId = id;
+  return next;
+}
+
+export function getAppearanceSourceMessage(source: AppearanceSource) {
+  if (source === 'preset') {
+    return 'Using the bundled Hermes preset. The sprite contract is ready for a production 4x4 sheet.';
+  }
+  if (source === 'generated') {
+    return 'Generate is not connected yet. This placeholder keeps the flow honest until image generation is wired.';
+  }
+  return 'Upload is not connected yet. This placeholder keeps local file handling out of v0 until it is implemented.';
+}
+
+export function getCompanionProviderMode(bridgeMode: BridgeMode, hermesAvailable: 'available' | 'unavailable' | 'unchecked'): ProviderMode {
+  if (bridgeMode === 'real') return 'hermes';
+  if (bridgeMode === 'mock') return 'mock';
+  return hermesAvailable === 'available' ? 'hermes' : 'mock';
+}
+
+function getProviderStatusCopy(bridgeMode: BridgeMode, providerMode: ProviderMode, bridgeUnavailable: boolean) {
+  if (bridgeMode === 'real') {
+    return bridgeUnavailable ? 'Hermes bridge unavailable. Real mode will not use mock output.' : 'Hermes bridge connected.';
+  }
+  if (bridgeMode === 'auto' && providerMode === 'mock') {
+    return 'Auto mode is using local mock because Hermes is unavailable.';
+  }
+  return providerMode === 'mock' ? 'Mock mode is explicit.' : 'Hermes bridge connected.';
+}
+
+function cloneCompanionState(state: CompanionRuntimeState): CompanionRuntimeState {
+  return JSON.parse(JSON.stringify(state)) as CompanionRuntimeState;
+}
+
+function clampCompanionPosition(position: Companion['position']): Companion['position'] {
+  const x = Number.isFinite(position.x) ? position.x : 50;
+  const y = Number.isFinite(position.y) ? position.y : 50;
+  return {
+    x: Math.min(82, Math.max(18, x)),
+    y: Math.min(78, Math.max(24, y)),
+  };
+}
+
+function sanitizeCompanion(companion: Companion): Companion {
+  return {
+    ...companion,
+    position: clampCompanionPosition(companion.position),
+    scale: Number.isFinite(companion.scale) ? Math.min(1.18, Math.max(0.62, companion.scale)) : 1,
+  };
+}
+
+export function createInitialCompanionState(): CompanionRuntimeState {
+  const defaultAppearance: CompanionAppearance = {
+    id: 'hermes-default',
+    name: 'Hermes Light',
+    source: 'preset',
+    thumbnailUrl: hermesCharacterUrl,
+    spriteSheetUrl: hermesCharacterUrl,
+    frameWidth: 512,
+    frameHeight: 512,
+    rows: { idle: 0, talk: 1, think: 2, wave: 3 },
+    framesPerRow: 4,
+    fps: { idle: 6, talk: 8, think: 6, wave: 8 },
+    background: { type: 'transparent' },
+  };
+
+  return {
+    selectedCompanionId: 'hermes',
+    companions: [
+      {
+        id: 'hermes',
+        name: 'Hermes',
+        description: 'Your digital concierge',
+        visible: true,
+        status: 'idle',
+        appearanceId: defaultAppearance.id,
+        position: { x: 50, y: 54 },
+        scale: 1,
+        behavior: {
+          allowDrag: true,
+          showSpeechBubbles: true,
+          idleAtScreenEdge: false,
+          clickThrough: false,
+        },
+        agent: { provider: 'mock', model: 'local companion mode' },
+      },
+      {
+        id: 'astra',
+        name: 'Astra',
+        description: 'Productivity analyst',
+        visible: true,
+        status: 'idle',
+        appearanceId: 'astra-placeholder',
+        position: { x: 50, y: 54 },
+        scale: 1,
+        behavior: {
+          allowDrag: true,
+          showSpeechBubbles: true,
+        },
+        agent: { provider: 'mock', model: 'local companion mode' },
+      },
+      {
+        id: 'orion',
+        name: 'Orion',
+        description: 'Research specialist',
+        visible: false,
+        status: 'hidden',
+        appearanceId: 'orion-placeholder',
+        position: { x: 50, y: 54 },
+        scale: 1,
+        behavior: {
+          allowDrag: true,
+          showSpeechBubbles: true,
+        },
+        agent: { provider: 'mock', model: 'local companion mode' },
+      },
+    ],
+    appearances: [
+      defaultAppearance,
+      { ...defaultAppearance, id: 'astra-placeholder', name: 'Astra Preset' },
+      { ...defaultAppearance, id: 'orion-placeholder', name: 'Orion Preset' },
+    ],
+    settings: {
+      launchAtStartup: false,
+      alwaysOnTop: true,
+      rememberPositions: true,
+      allowDragging: true,
+      showSpeechBubbles: true,
+      quietMode: false,
+      clickThrough: false,
+      lowResourceMode: false,
+      theme: 'system',
+    },
+  };
+}
+
+export function getNextAnimationState(event: CompanionEvent): AnimationState {
+  switch (event) {
+    case 'click':
+      return 'wave';
+    case 'send':
+    case 'error':
+      return 'think';
+    case 'response':
+      return 'talk';
+    case 'timeout':
+      return 'idle';
+  }
+}
+
+export function createCompanionChatProvider({
+  mode,
+  bridge,
+  waitTimeoutMs = 30_000,
+  pollIntervalMs = 250,
+}: CompanionChatProviderOptions): ChatProvider {
+  if (mode === 'mock') {
+    return {
+      async sendMessage(input) {
+        const lastUserMessage = [...input.messages].reverse().find((message) => message.role === 'user');
+        const index = Math.abs((lastUserMessage?.content.length ?? 0) + input.companionId.length) % mockResponses.length;
+        return {
+          role: 'assistant',
+          content: mockResponses[index],
+          timestamp: Date.now(),
+        };
+      },
+    };
+  }
+
+  return {
+    async sendMessage(input) {
+      if (!bridge?.submitTask && !bridge?.createTask) {
+        throw new Error('Hermes bridge is unavailable for companion chat.');
+      }
+
+      const lastUserMessage = [...input.messages].reverse().find((message) => message.role === 'user');
+      const prompt = lastUserMessage?.content.trim();
+      if (!prompt) {
+        throw new Error('Hermes bridge cannot send an empty companion message.');
+      }
+
+      const snapshot = bridge.getSnapshot();
+      const companionAgent = snapshot.agents.find((agent) => agent.activeInPet) ?? snapshot.agents[0];
+      if (!companionAgent || companionAgent.availability === 'offline') {
+        throw new Error('Hermes bridge is unavailable for companion chat.');
+      }
+
+      const taskId = bridge.submitTask
+        ? await bridge.submitTask({ brief: prompt, assigneeId: companionAgent.id, type: 'pet' })
+        : bridge.createTask({ brief: prompt, assigneeId: companionAgent.id, type: 'pet' });
+      const content = await waitForBridgeOutput(bridge, taskId, waitTimeoutMs, pollIntervalMs);
+
+      return {
+        role: 'assistant',
+        content,
+        timestamp: Date.now(),
+      };
+    },
+  };
+}
+
+async function waitForBridgeOutput(
+  bridge: HermesBridgeApi,
+  taskId: string,
+  waitTimeoutMs: number,
+  pollIntervalMs: number,
+): Promise<string> {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt <= waitTimeoutMs) {
+    const snapshot = bridge.getSnapshot();
+    const report = snapshot.reports.find((item) => item.taskId === taskId);
+    if (report?.summary.trim()) return report.summary;
+
+    const task = bridge.getTask ? await bridge.getTask(taskId) : snapshot.tasks.find((item) => item.id === taskId);
+    if (task?.error?.trim()) return task.error;
+    if (task?.state === 'error') return 'Hermes could not complete that.';
+
+    await new Promise((resolve) => globalThis.setTimeout(resolve, pollIntervalMs));
+  }
+
+  throw new Error('Hermes bridge did not finish the companion chat before the timeout.');
+}
+
+function loadCompanionState(): CompanionRuntimeState {
+  const initialState = createInitialCompanionState();
+  if (typeof localStorage === 'undefined') return initialState;
+
+  try {
+    const stored = localStorage.getItem(companionStateStorageKey);
+    if (!stored) return initialState;
+    const parsed = JSON.parse(stored) as Partial<CompanionRuntimeState>;
+    const companions = parsed.companions?.length ? parsed.companions.map((companion) => sanitizeCompanion(companion)) : initialState.companions;
+    return {
+      ...initialState,
+      ...parsed,
+      companions,
+      appearances: parsed.appearances?.length ? parsed.appearances : initialState.appearances,
+      settings: { ...initialState.settings, ...parsed.settings },
+      selectedCompanionId: parsed.selectedCompanionId ?? initialState.selectedCompanionId,
+    };
+  } catch {
+    return initialState;
+  }
+}
+
+function persistCompanionState(state: CompanionRuntimeState) {
+  if (typeof localStorage === 'undefined') return;
+  localStorage.setItem(companionStateStorageKey, JSON.stringify(state));
+}
+
+function statusToAnimation(status: CompanionStatus): AnimationState {
+  if (status === 'thinking') return 'think';
+  if (status === 'talking') return 'talk';
+  return 'idle';
 }
 
 function App() {
-  const { snapshot, lastEvent, bridge, bridgeReady, bridgeConfig, applyBridgeConfig } = useBridgeSnapshot();
-  const [activeView, setActiveView] = useState<MainView>(getInitialView);
-  const [petOnly] = useState(isPetWindowMode);
-  const [selectedVariantId] = useState<VariantId>(getInitialVariant);
-  const [selectedTaskId, setSelectedTaskId] = useState<string | undefined>();
-  const [petInput, setPetInput] = useState('');
-  const [boardInput, setBoardInput] = useState('');
-  const [boardGoals, setBoardGoals] = useState('');
-  const [boardNonGoals, setBoardNonGoals] = useState('');
-  const [boardContext, setBoardContext] = useState('');
-  const [boardDefinitionOfDone, setBoardDefinitionOfDone] = useState('');
-  const [boardAssignee, setBoardAssignee] = useState(snapshot.activeProfileId);
-  const [revisionText, setRevisionText] = useState('Make it shorter for a 5 minute demo.');
-  const [draftBridgeConfig, setDraftBridgeConfig] = useState(bridgeConfig);
-
-  const activeAgent = snapshot.agents.find((agent) => agent.id === snapshot.activeProfileId) ?? snapshot.agents[0];
-  const tasks = snapshot.tasks;
-  const selectedTask = useMemo(
-    () => tasks.find((task) => task.id === selectedTaskId) ?? tasks[0],
-    [selectedTaskId, tasks],
-  );
-  const activeQuest = tasks.find((task) => task.assigneeId === activeAgent.id && !['approved', 'needs_review'].includes(task.state));
-  const pendingReports = snapshot.reports.filter((report) => {
-    const task = tasks.find((item) => item.id === report.taskId);
-    return isActionableReportTask(task);
-  });
-  const selectedVariant = uiVariants.find((variant) => variant.id === selectedVariantId) ?? uiVariants[0];
+  const panelWindow = getPanelWindow();
+  const { bridge, bridgeReady, bridgeConfig, snapshot } = useBridgeSnapshot();
+  const [runtime, setRuntime] = useState<CompanionRuntimeState>(() => loadCompanionState());
+  const [draftMessage, setDraftMessage] = useState('');
+  const [appearanceSource, setAppearanceSource] = useState<AppearanceSource>('preset');
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      role: 'assistant',
+      content: 'Good morning!\nHow can I help you today?',
+      timestamp: Date.now(),
+    },
+  ]);
+  const [animation, setAnimation] = useState<AnimationState>('idle');
+  const [isDragging, setIsDragging] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const dragOffset = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
-    setDraftBridgeConfig(bridgeConfig);
-  }, [bridgeConfig]);
+    persistCompanionState(runtime);
+  }, [runtime]);
 
   useEffect(() => {
-    if (snapshot.agents.some((agent) => agent.id === boardAssignee)) return;
-    setBoardAssignee(snapshot.activeProfileId);
-  }, [boardAssignee, snapshot.activeProfileId, snapshot.agents]);
-
-  useEffect(() => {
-    persistVariant(selectedVariantId);
-  }, [selectedVariantId]);
-
-  useEffect(() => {
-    if (petOnly) return undefined;
-
-    const handlePetHandoff = (event: StorageEvent) => {
-      if (event.key !== petHandoffStorageKey || !event.newValue) return;
-
-      try {
-        const handoff = JSON.parse(event.newValue) as { view?: MainView; taskId?: string };
-        if (handoff.view !== 'hall' && handoff.view !== 'board' && handoff.view !== 'review') return;
-        if (handoff.taskId) setSelectedTaskId(handoff.taskId);
-        setActiveView(handoff.view);
-      } catch {
-        // Ignore malformed handoff values from older app sessions.
-      }
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key !== companionStateStorageKey) return;
+      setRuntime(loadCompanionState());
     };
 
-    window.addEventListener('storage', handlePetHandoff);
-    return () => window.removeEventListener('storage', handlePetHandoff);
-  }, [petOnly]);
+    window.addEventListener('storage', handleStorage);
+    return () => window.removeEventListener('storage', handleStorage);
+  }, []);
 
-  async function openMainView(view: MainView, taskId?: string) {
-    writePetHandoff(view, taskId);
-    const focusedNativeWindow = await focusGuildHallWindow()
-      .catch(() => focusGuildHallWindowWithWebviewFallback())
-      .catch(() => false);
-    if (!focusedNativeWindow) {
-      if (taskId) setSelectedTaskId(taskId);
-      setActiveView(view);
-    }
-  }
+  useEffect(() => {
+    if (!contextMenu) return undefined;
+    const closeContextMenu = () => setContextMenu(null);
+    window.addEventListener('pointerdown', closeContextMenu);
+    return () => window.removeEventListener('pointerdown', closeContextMenu);
+  }, [contextMenu]);
 
-  async function createPetQuest(options: { openHall?: boolean } = {}) {
-    if (!petInput.trim()) return undefined;
-    const taskId = bridge.submitTask
-      ? await bridge.submitTask({ brief: petInput.trim(), assigneeId: activeAgent.id, type: 'pet' })
-      : bridge.createTask({ brief: petInput.trim(), assigneeId: activeAgent.id, type: 'pet' });
-    setSelectedTaskId(taskId);
-    setPetInput('');
-    if (options.openHall !== false) {
-      setActiveView('board');
-      void openMainView('board', taskId);
-    }
-    return taskId;
-  }
+  const selectedCompanion = runtime.companions.find((companion) => companion.id === runtime.selectedCompanionId) ?? runtime.companions[0];
+  const selectedAppearance = runtime.appearances.find((appearance) => appearance.id === selectedCompanion.appearanceId) ?? runtime.appearances[0];
+  const activeMessage = [...messages].reverse().find((message) => message.role === 'assistant');
+  const providerMode = getCompanionProviderMode(bridgeConfig.bridgeMode, snapshot.systemStatus.hermesAvailable);
+  const provider = useMemo(
+    () => createCompanionChatProvider({ mode: providerMode, bridge: bridgeReady ? bridge : undefined }),
+    [bridge, bridgeReady, providerMode],
+  );
+  const bridgeUnavailable = providerMode === 'hermes' && snapshot.systemStatus.hermesAvailable !== 'available';
 
-  async function createBoardQuest() {
-    if (!boardInput.trim()) return;
-    const taskInput = {
-      brief: boardInput.trim(),
-      goals: boardGoals.trim() || undefined,
-      nonGoals: boardNonGoals.trim() || undefined,
-      context: boardContext.trim() || undefined,
-      definitionOfDone: boardDefinitionOfDone.trim() || undefined,
-      assigneeId: boardAssignee,
-      type: 'quest_board' as const,
-    };
-    const taskId = bridge.submitTask ? await bridge.submitTask(taskInput) : bridge.createTask(taskInput);
-    setSelectedTaskId(taskId);
-    setBoardInput('');
-    setBoardGoals('');
-    setBoardNonGoals('');
-    setBoardContext('');
-    setBoardDefinitionOfDone('');
-  }
-
-  async function stopQuest(taskId: string) {
-    await bridge.stopTask?.(taskId);
-  }
-
-  const openHall = async () => {
-    await openMainView('hall');
+  const updateRuntime = (recipe: (state: CompanionRuntimeState) => void) => {
+    setRuntime((current) => {
+      const next = cloneCompanionState(current);
+      recipe(next);
+      return next;
+    });
   };
 
-  if (!petOnly && isPixelShowcaseMode()) {
-    return <PixelShowcase />;
-  }
-
-  if (petOnly) {
-    return (
-      <div className={`pet-window-shell ${selectedVariant.className}`} data-variant={selectedVariant.id}>
-        <PetPanel
-          activeAgent={activeAgent}
-          activeQuest={activeQuest}
-          tasks={tasks}
-          pendingReports={pendingReports}
-          petInput={petInput}
-          onPetInput={setPetInput}
-          onCreateQuest={() => createPetQuest({ openHall: false })}
-          onOpenHall={openHall}
-          onOpenBoard={() => openMainView('board', activeQuest?.id)}
-          onOpenReview={() => openMainView('review')}
-          onOpenIssue={() => openMainView('board', activeQuest?.id)}
-          bridgeReady={bridgeReady}
-          nativeDragEnabled={petOnly}
-        />
-      </div>
-    );
-  }
-
-  if (activeView === 'hall') {
-    return (
-      <div className={`main-window-shell ${selectedVariant.className}`} data-variant={selectedVariant.id}>
-        <GuildHall
-          agents={snapshot.agents}
-          activeAgent={activeAgent}
-          activeQuest={activeQuest}
-          pendingReports={pendingReports}
-          tasks={tasks}
-          systemStatus={snapshot.systemStatus}
-          bridgeConfig={draftBridgeConfig}
-          bridgeReady={bridgeReady}
-          onBridgeConfigChange={setDraftBridgeConfig}
-          onApplyBridgeConfig={() => applyBridgeConfig(draftBridgeConfig)}
-          onSelectAgent={(agentId) => {
-            bridge.setActiveProfile(agentId);
-            setBoardAssignee(agentId);
-          }}
-          onOpenTask={(taskId) => {
-            setSelectedTaskId(taskId);
-            setActiveView('board');
-          }}
-          onOpenBoard={() => setActiveView('board')}
-          onOpenReview={() => setActiveView('review')}
-          revisionText={revisionText}
-          onRevisionText={setRevisionText}
-          onApprove={(reportId) => bridge.approveReport(reportId)}
-          onRevise={(reportId) => {
-            bridge.requestRevision(reportId, revisionText);
-            setActiveView('board');
-          }}
-          commandValue={petInput}
-          onCommandValue={setPetInput}
-          onCreateQuest={createPetQuest}
-          onStopTask={stopQuest}
-        />
-      </div>
-    );
-  }
-
-  return (
-    <div className={`main-window-shell ${selectedVariant.className}`} data-variant={selectedVariant.id}>
-      <PixelAppWindow
-        className="pixel-guild-window pixel-workbench-window"
-        title="Hermes Guild"
-        subtitle={`${viewTitle[activeView]} · Companion Workbench`}
-        status={
-          <BridgeStatusDetails
-            status={snapshot.systemStatus}
-            config={draftBridgeConfig}
-            bridgeReady={bridgeReady}
-            onConfigChange={setDraftBridgeConfig}
-            onApply={() => applyBridgeConfig(draftBridgeConfig)}
-          />
-        }
-        toolbar={
-          <AppHeader
-            activeView={activeView}
-            pendingCount={pendingReports.length}
-            onOpenHall={() => setActiveView('hall')}
-            onOpenBoard={() => setActiveView('board')}
-            onOpenReview={() => setActiveView('review')}
-          />
-        }
-      >
-        <main className="workbench-screen">
-
-        {activeView === 'board' && (
-          <QuestBoard
-            agents={snapshot.agents}
-            tasks={tasks}
-            selectedTask={selectedTask}
-            systemStatus={snapshot.systemStatus}
-            boardInput={boardInput}
-            boardGoals={boardGoals}
-            boardNonGoals={boardNonGoals}
-            boardContext={boardContext}
-            boardDefinitionOfDone={boardDefinitionOfDone}
-            boardAssignee={boardAssignee}
-            onBoardInput={setBoardInput}
-            onBoardGoals={setBoardGoals}
-            onBoardNonGoals={setBoardNonGoals}
-            onBoardContext={setBoardContext}
-            onBoardDefinitionOfDone={setBoardDefinitionOfDone}
-            onBoardAssignee={setBoardAssignee}
-            onCreateQuest={createBoardQuest}
-            onSelectTask={setSelectedTaskId}
-            onStopTask={stopQuest}
-            bridgeReady={bridgeReady}
-          />
-        )}
-
-        {activeView === 'review' && (
-          <ReviewChamber
-            reports={snapshot.reports}
-            tasks={tasks}
-            agents={snapshot.agents}
-            revisionText={revisionText}
-            onRevisionText={setRevisionText}
-            onApprove={(reportId) => bridge.approveReport(reportId)}
-            onRevise={(reportId) => {
-              bridge.requestRevision(reportId, revisionText);
-              setActiveView('board');
-            }}
-          />
-        )}
-
-        {lastEvent && (
-          <footer className="event-footer">
-            <span>{statusLabel[lastEvent.type] ?? lastEvent.type.replaceAll('_', ' ')}</span>
-            <time>{new Date(lastEvent.timestamp).toLocaleTimeString()}</time>
-          </footer>
-        )}
-        </main>
-      </PixelAppWindow>
-    </div>
-  );
-}
-
-interface AppHeaderProps {
-  activeView: MainView;
-  pendingCount: number;
-  onOpenHall: () => void;
-  onOpenBoard: () => void;
-  onOpenReview: () => void;
-}
-
-function AppHeader({ activeView, pendingCount, onOpenHall, onOpenBoard, onOpenReview }: AppHeaderProps) {
-  return (
-    <div className="pixel-main-toolbar app-header">
-      <span>{viewTitle[activeView]}</span>
-      <div>
-        <PixelButton type="button" tone={activeView === 'hall' ? 'primary' : 'ghost'} onClick={onOpenHall}>
-          <PixelIcon name="guild-hall" size={18} /> Guild Hall
-        </PixelButton>
-        <PixelButton type="button" tone={activeView === 'board' ? 'primary' : 'ghost'} onClick={onOpenBoard}>
-          <PixelIcon name="quest-board" size={18} /> Quest Board
-        </PixelButton>
-        <PixelButton type="button" tone={activeView === 'review' ? 'primary' : 'ghost'} onClick={onOpenReview}>
-          <PixelIcon name="review" size={18} /> Review
-          {pendingCount > 0 && <strong className="pixel-toolbar-count">{pendingCount}</strong>}
-        </PixelButton>
-      </div>
-    </div>
-  );
-}
-
-interface BridgeStatusDetailsProps {
-  status: SystemStatus;
-  config: BridgeConfig;
-  bridgeReady: boolean;
-  onConfigChange: (config: BridgeConfig) => void;
-  onApply: () => void;
-}
-
-function BridgeStatusDetails({ status, config, bridgeReady, onConfigChange, onApply }: BridgeStatusDetailsProps) {
-  const bridgeModeLabel = status.bridgeMode.slice(0, 1).toUpperCase() + status.bridgeMode.slice(1);
-  const bridgeFallbackLabel = status.fallbackReason
-    ? status.activeImplementation === 'mock'
-      ? 'Mock fallback'
-      : 'Fallback active'
-    : getExecutionSource(status);
-  const operationalRows = getOperationalStatusRows(status);
-
-  return (
-    <details className="pixel-bridge-status">
-      <summary>
-        <span>Bridge:</span> {bridgeModeLabel} · {bridgeFallbackLabel}
-      </summary>
-      <div className="pixel-bridge-settings">
-        <label>
-          Bridge mode
-          <PixelSelect
-            value={config.bridgeMode}
-            onChange={(bridgeMode) => onConfigChange({ ...config, bridgeMode: bridgeMode as BridgeMode })}
-            ariaLabel="Bridge mode"
-          >
-            <option value="mock">mock</option>
-            <option value="auto">auto</option>
-            <option value="real">real</option>
-          </PixelSelect>
-        </label>
-        <label>
-          Gateway REST
-          <PixelInput
-            value={config.hermesApiBaseUrl}
-            onChange={(hermesApiBaseUrl) => onConfigChange({ ...config, hermesApiBaseUrl })}
-            ariaLabel="Hermes gateway base URL"
-          />
-        </label>
-        <label>
-          Dashboard compatibility
-          <PixelInput
-            value={config.hermesDashboardBaseUrl}
-            onChange={(hermesDashboardBaseUrl) => onConfigChange({ ...config, hermesDashboardBaseUrl })}
-            ariaLabel="Hermes dashboard compatibility base URL"
-          />
-        </label>
-        <label>
-          Sidecar compatibility
-          <PixelInput
-            value={config.hermesSidecarBaseUrl}
-            onChange={(hermesSidecarBaseUrl) => onConfigChange({ ...config, hermesSidecarBaseUrl })}
-            ariaLabel="Hermes sidecar compatibility base URL"
-          />
-        </label>
-        <PixelButton type="button" tone="ghost" onClick={onApply} disabled={!bridgeReady}>
-          Save
-        </PixelButton>
-        <PixelBadge status={status.activeImplementation}>Hermes {status.hermesAvailable}</PixelBadge>
-        <PixelBadge status={status.dashboardAvailable === 'available' ? 'real' : 'mock'}>Dashboard {status.dashboardAvailable ?? 'unchecked'}</PixelBadge>
-        <PixelBadge status={status.sidecarAvailable === 'available' ? 'real' : 'mock'}>Sidecar {status.sidecarAvailable ?? 'unchecked'}</PixelBadge>
-        {operationalRows.length > 0 && (
-          <div className="pixel-operational-status" aria-label="Hermes operational data">
-            {operationalRows.map((row) => (
-              <span key={row.label}>
-                <strong>{row.label}</strong>
-                {row.value}
-                <em>{row.source}</em>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </details>
-  );
-}
-
-interface PetPanelProps {
-  activeAgent: Agent;
-  activeQuest?: Task;
-  tasks: Task[];
-  pendingReports: ReportCard[];
-  petInput: string;
-  onPetInput: (value: string) => void;
-  onCreateQuest: () => string | void | Promise<string | void>;
-  onOpenHall: () => void | Promise<void>;
-  onOpenBoard: () => void | Promise<void>;
-  onOpenReview: () => void | Promise<void>;
-  onOpenIssue: () => void | Promise<void>;
-  bridgeReady: boolean;
-  nativeDragEnabled: boolean;
-}
-
-function PetPanel({
-  activeAgent,
-  activeQuest,
-  tasks,
-  pendingReports,
-  petInput,
-  onPetInput,
-  onCreateQuest,
-  onOpenHall,
-  onOpenBoard,
-  onOpenReview,
-  onOpenIssue,
-  bridgeReady,
-  nativeDragEnabled,
-}: PetPanelProps) {
-  const [expanded, setExpanded] = useState(() => new URLSearchParams(window.location.search).get('pet') === 'expanded');
-  const [chatState, setChatState] = useState<'idle' | 'sending' | 'sent' | 'error'>('idle');
-  const [chatMessages, setChatMessages] = useState<PetChatMessage[]>([]);
-  const [lastSubmittedTaskId, setLastSubmittedTaskId] = useState<string | undefined>();
-  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const pointerDraggingRef = useRef(false);
-  const suppressNextClickRef = useRef(false);
-  const lastDerivedMessageKeyRef = useRef<string | undefined>(undefined);
-  const messageListRef = useRef<HTMLDivElement | null>(null);
-  const chatBubbleRef = useRef<HTMLFormElement | null>(null);
-  const petCharacterRef = useRef<HTMLButtonElement | null>(null);
-  const petInputRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null);
-  const petState = getPetDisplayState(activeAgent, activeQuest, pendingReports.length);
-  const copy = petStateCopy[petState];
-  const avatarClass = getPetAvatarAssetClass(activeAgent.role, petState);
-
-  useEffect(() => {
-    const derivedMessage = getPetAgentResponse({ activeAgent, activeQuest, pendingReports, tasks, lastSubmittedTaskId });
-    if (!derivedMessage || derivedMessage.key === lastDerivedMessageKeyRef.current) return;
-
-    lastDerivedMessageKeyRef.current = derivedMessage.key;
-    setChatMessages((messages) => trimPetMessages([...messages, derivedMessage.message]));
-    if (derivedMessage.state) {
-      setChatState(derivedMessage.state);
-    }
-  }, [activeAgent, activeQuest, lastSubmittedTaskId, pendingReports, tasks]);
-
-  useEffect(() => {
-    if (!expanded || !messageListRef.current) return;
-    messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
-  }, [chatMessages, expanded]);
-
-  useEffect(() => {
-    if (!expanded) return undefined;
-    const frame = requestAnimationFrame(() => petInputRef.current?.focus());
-    return () => cancelAnimationFrame(frame);
-  }, [expanded]);
-
-  useEffect(() => {
-    if (!expanded) return undefined;
-
-    const handleOutsideClick = (event: globalThis.MouseEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (chatBubbleRef.current?.contains(target)) return;
-      if (petCharacterRef.current?.contains(target)) return;
-      setExpanded(false);
-    };
-
-    document.addEventListener('click', handleOutsideClick);
-    return () => document.removeEventListener('click', handleOutsideClick);
-  }, [expanded]);
-
-  const appendPetMessage = (message: PetChatMessage) => {
-    setChatMessages((messages) => trimPetMessages([...messages, message]));
+  const updateSelectedCompanion = (patch: Partial<Companion>) => {
+    updateRuntime((state) => {
+      state.companions = state.companions.map((companion) => (
+        companion.id === state.selectedCompanionId ? { ...companion, ...patch } : companion
+      ));
+    });
   };
 
-  const handleCreateQuest = async () => {
-    const submittedText = petInput.trim();
-    if (!submittedText || chatState === 'sending') return;
-    const submittedAt = Date.now();
-    setExpanded(true);
-    setChatState('sending');
-    setChatMessages([
-      {
-        id: `user-${submittedAt}`,
-        speaker: 'user',
-        text: submittedText,
-      },
-    ]);
-    try {
-      const taskId = await onCreateQuest();
-      if (taskId) {
-        setLastSubmittedTaskId(taskId);
-      }
-      setChatState('sent');
-    } catch {
-      setChatState('error');
-      appendPetMessage({
-        id: `agent-error-${Date.now()}`,
-        speaker: 'agent',
-        text: 'I could not send that quest. Open Hall for details if it keeps failing.',
-        tone: 'error',
-      });
-    }
+  const setSelectedStatus = (status: CompanionStatus) => {
+    updateSelectedCompanion({ status });
   };
 
-  const handlePetClick = (event?: MouseEvent<HTMLElement>) => {
-    if (suppressNextClickRef.current) {
-      suppressNextClickRef.current = false;
-      event?.preventDefault();
-      event?.stopPropagation();
+  const handleCompanionClick = () => {
+    setAnimation(getNextAnimationState('click'));
+    setSelectedStatus('idle');
+    setChatOpen((open) => !open);
+    window.setTimeout(() => setAnimation('idle'), 900);
+  };
+
+  const handleCompanionContextMenu = (event: MouseEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    setContextMenu({
+      x: Math.min(window.innerWidth - 180, event.clientX),
+      y: Math.min(window.innerHeight - 160, event.clientY),
+    });
+  };
+
+  const handlePointerDown = (event: PointerEvent<HTMLButtonElement>) => {
+    if (!runtime.settings.allowDragging || !selectedCompanion.behavior.allowDrag) return;
+    if (event.button === 0 && startNativeWindowDrag()) {
+      event.preventDefault();
       return;
     }
-    event?.stopPropagation();
-    setExpanded((isExpanded) => !isExpanded);
+
+    setIsDragging(true);
+    const rect = event.currentTarget.getBoundingClientRect();
+    dragOffset.current = {
+      x: event.clientX - rect.left,
+      y: event.clientY - rect.top,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
   };
 
-  const handleWidgetClick = () => {
-    if (!expanded) return;
-    setExpanded(false);
+  const handlePointerMove = (event: PointerEvent<HTMLButtonElement>) => {
+    if (!isDragging) return;
+    const nextX = ((event.clientX - dragOffset.current.x) / window.innerWidth) * 100;
+    const nextY = ((event.clientY - dragOffset.current.y) / window.innerHeight) * 100;
+    updateSelectedCompanion({
+      position: {
+        x: Math.min(82, Math.max(18, nextX)),
+        y: Math.min(78, Math.max(24, nextY)),
+      },
+    });
   };
 
-  const handleDoubleClick = () => {
-    void onOpenHall();
+  const handlePointerUp = (event: PointerEvent<HTMLButtonElement>) => {
+    setIsDragging(false);
+    event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
-  const handlePointerDown = (event: PointerEvent<HTMLElement>) => {
-    if (event.button !== 0) return;
-    pointerStartRef.current = { x: event.clientX, y: event.clientY };
-    pointerDraggingRef.current = false;
-  };
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    const content = draftMessage.trim();
+    if (!content) return;
 
-  const handlePointerMove = (event: PointerEvent<HTMLElement>) => {
-    if (!pointerStartRef.current) return;
-    const deltaX = Math.abs(event.clientX - pointerStartRef.current.x);
-    const deltaY = Math.abs(event.clientY - pointerStartRef.current.y);
-    if (deltaX + deltaY < 7) return;
-    pointerDraggingRef.current = true;
-    suppressNextClickRef.current = true;
-    pointerStartRef.current = null;
-    if (nativeDragEnabled) {
-      void startPetWindowDrag();
+    const userMessage: ChatMessage = { role: 'user', content, timestamp: Date.now() };
+    const nextMessages = [...messages, userMessage];
+    setMessages(nextMessages);
+    setDraftMessage('');
+    setChatOpen(true);
+    setAnimation(getNextAnimationState('send'));
+    setSelectedStatus('thinking');
+
+    try {
+      const response = await provider.sendMessage({
+        companionId: selectedCompanion.id,
+        messages: nextMessages,
+      });
+      setMessages((current) => [...current, response]);
+      setAnimation(getNextAnimationState('response'));
+      setSelectedStatus('talking');
+      window.setTimeout(() => {
+        setAnimation(getNextAnimationState('timeout'));
+        setSelectedStatus('idle');
+      }, runtime.settings.lowResourceMode ? 900 : 2200);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Hermes could not complete that.';
+      setMessages((current) => [...current, { role: 'assistant', content: message, timestamp: Date.now() }]);
+      setAnimation(getNextAnimationState('error'));
+      setSelectedStatus('thinking');
     }
   };
 
-  const handlePointerUp = () => {
-    if (pointerDraggingRef.current) {
-      suppressNextClickRef.current = true;
-    }
-    pointerStartRef.current = null;
-    pointerDraggingRef.current = false;
-  };
+  const companionStyle = {
+    '--companion-x': `${selectedCompanion.position.x}%`,
+    '--companion-y': `${selectedCompanion.position.y}%`,
+    '--companion-scale': selectedCompanion.scale,
+  } as CSSProperties;
 
-  const handoffAction =
-    petState === 'needs_review'
-      ? { label: 'Review', icon: 'review' as const, action: onOpenReview }
-      : petState === 'error'
-        ? { label: 'Issue', icon: 'warning' as const, action: onOpenIssue }
-        : petState === 'running' || petState === 'thinking'
-          ? { label: 'Progress', icon: 'quest-log' as const, action: onOpenBoard }
-          : { label: 'Hall', icon: 'guild-hall' as const, action: onOpenHall };
+  if (panelWindow) {
+    return (
+      <PanelWindowShell panel={panelWindow}>
+        {panelWindow === 'companions' ? (
+          <CompanionsPopover
+            open
+            runtime={runtime}
+            onClose={() => void hidePanelWindow(panelWindow)}
+            onSelect={(id) => updateRuntime((state) => { state.selectedCompanionId = id; })}
+            onToggleVisibility={(id) => updateRuntime((state) => {
+              state.companions = state.companions.map((companion) => {
+                if (companion.id !== id) return companion;
+                const visible = !companion.visible;
+                return { ...companion, visible, status: visible ? 'idle' : 'hidden' };
+              });
+            })}
+            onAddCompanion={() => setRuntime((current) => addCompanion(current))}
+          />
+        ) : null}
+
+        {panelWindow === 'appearance' ? (
+          <AppearancePopover
+            open
+            companion={selectedCompanion}
+            appearance={selectedAppearance}
+            animation={animation}
+            source={appearanceSource}
+            onClose={() => void hidePanelWindow(panelWindow)}
+            onNameChange={(name) => updateSelectedCompanion({ name })}
+            onVisibilityChange={(visible) => updateSelectedCompanion({ visible, status: visible ? 'idle' : 'hidden' })}
+            onScaleChange={(scale) => updateSelectedCompanion({ scale })}
+            onAnimationPreview={(nextAnimation) => {
+              setAnimation(nextAnimation);
+              setSelectedStatus(nextAnimation === 'talk' ? 'talking' : nextAnimation === 'think' ? 'thinking' : 'idle');
+            }}
+            onSourceChange={setAppearanceSource}
+          />
+        ) : null}
+
+        {panelWindow === 'settings' ? (
+          <SettingsPopover
+            open
+            settings={runtime.settings}
+            bridgeMode={providerMode}
+            bridgeConfigMode={bridgeConfig.bridgeMode}
+            bridgeUnavailable={bridgeUnavailable}
+            onClose={() => void hidePanelWindow(panelWindow)}
+            onChange={(patch) => updateRuntime((state) => {
+              state.settings = { ...state.settings, ...patch };
+              state.companions = state.companions.map((companion) => ({
+                ...companion,
+                behavior: {
+                  ...companion.behavior,
+                  allowDrag: patch.allowDragging ?? companion.behavior.allowDrag,
+                  showSpeechBubbles: patch.showSpeechBubbles ?? companion.behavior.showSpeechBubbles,
+                  clickThrough: patch.clickThrough ?? companion.behavior.clickThrough,
+                },
+              }));
+            })}
+          />
+        ) : null}
+      </PanelWindowShell>
+    );
+  }
 
   return (
-    <aside
-      className={`pet-widget ${expanded ? 'bubble-open' : 'collapsed'} pet-state-${petState}`}
-      aria-label={`${activeAgent.name} companion, ${copy.label}`}
-      onDoubleClick={handleDoubleClick}
-      onClick={handleWidgetClick}
-    >
-      <button
-        ref={petCharacterRef}
-        type="button"
-        className="pet-character"
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerCancel={handlePointerUp}
-        onClick={handlePetClick}
-        aria-label={`${activeAgent.name}: ${copy.message}`}
-      >
-        <span className="pet-state-ring" aria-hidden="true" />
-        <span className={`pet-character-sprite ${avatarClass}`} aria-hidden="true" />
-      </button>
+    <main className="desktop-companion-shell">
+      {chatOpen && runtime.settings.showSpeechBubbles && !runtime.settings.quietMode ? (
+        <SpeechBubble message={activeMessage?.content ?? ''} />
+      ) : null}
 
-      {expanded && (
-        <form
-          ref={chatBubbleRef}
-          className={`pet-chat-bubble pet-chat-${chatState}`}
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={(event) => event.stopPropagation()}
-          onSubmit={(event: FormEvent<HTMLFormElement>) => {
-            event.preventDefault();
-            void handleCreateQuest();
+      <section className="companion-stage" aria-label="Hermes desktop companion">
+        {[selectedCompanion].filter((companion) => companion.visible).map((companion) => (
+          <button
+            key={companion.id}
+            className={`companion-figure-button ${companion.id === selectedCompanion.id ? 'selected' : ''}`}
+            type="button"
+            style={companion.id === selectedCompanion.id ? companionStyle : {
+              '--companion-x': `${companion.position.x}%`,
+              '--companion-y': `${companion.position.y}%`,
+              '--companion-scale': companion.scale,
+            } as CSSProperties}
+            aria-label={`Chat with ${companion.name}`}
+            onClick={() => {
+              updateRuntime((state) => {
+                state.selectedCompanionId = companion.id;
+              });
+              handleCompanionClick();
+            }}
+            onPointerDown={companion.id === selectedCompanion.id ? handlePointerDown : undefined}
+            onPointerMove={companion.id === selectedCompanion.id ? handlePointerMove : undefined}
+            onPointerUp={companion.id === selectedCompanion.id ? handlePointerUp : undefined}
+            onContextMenu={companion.id === selectedCompanion.id ? handleCompanionContextMenu : undefined}
+          >
+            <span className={`companion-art companion-art-${animation}`} aria-hidden="true">
+              <img src={selectedAppearance.spriteSheetUrl} alt="" />
+            </span>
+            <span className="companion-shadow" />
+          </button>
+        ))}
+      </section>
+
+      {contextMenu ? (
+        <CompanionContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          onOpenPanel={(panel) => {
+            setContextMenu(null);
+            void showPanelWindow(panel);
           }}
-        >
-          <div className="pet-message-list" ref={messageListRef} aria-live="polite">
-            {chatMessages.map((message) => (
-              <div key={message.id} className={`pet-message pet-message-${message.speaker} ${message.tone ? `pet-message-${message.tone}` : ''}`}>
-                <span className="pet-message-speaker">{message.speaker === 'user' ? 'You' : activeAgent.name}</span>
-                <p>{message.text}</p>
-              </div>
-            ))}
-          </div>
-          <div className="pet-chat-tray">
-            {activeQuest && (
-              <div className="pet-chat-status" aria-label={`${activeQuest.title}: ${activeQuest.progress}% ${activeQuest.state.replace('_', ' ')}`}>
-                <span>{activeQuest.progress}%</span>
-                <span>{activeQuest.state.replace('_', ' ')}</span>
-              </div>
-            )}
-            <div className="pet-chat-row">
-              <PixelInput
-                className="pet-command-input"
-                value={petInput}
-                onChange={onPetInput}
-                placeholder="Ask Hermes..."
-                ariaLabel="Pet quick chat"
-                inputRef={petInputRef}
-              />
-              <PixelButton
-                className="pet-send-chip"
-                type="submit"
-                tone="primary"
-                disabled={!bridgeReady || !petInput.trim() || chatState === 'sending'}
-              >
-                <PixelIcon name="send" size={15} /> Send
-              </PixelButton>
-            </div>
-            <div className="pet-action-row" aria-label="Pet quick actions">
-              <button type="button" className="pet-action-chip" onClick={() => handoffAction.action()}>
-                <PixelIcon name={handoffAction.icon} size={13} /> {handoffAction.label === 'Hall' ? 'Open Hall' : handoffAction.label}
-              </button>
-            </div>
-          </div>
-        </form>
-      )}
+        />
+      ) : null}
+
+      {chatOpen ? (
+        <ChatInput
+          value={draftMessage}
+          disabled={selectedCompanion.status === 'hidden'}
+          onChange={setDraftMessage}
+          onSubmit={handleSubmit}
+        />
+      ) : null}
+    </main>
+  );
+}
+
+function SpeechBubble({ message }: { message: string }) {
+  return (
+    <aside className="speech-bubble" aria-live="polite">
+      <p>{message}</p>
     </aside>
   );
 }
 
-type PetDisplayState = 'idle' | 'thinking' | 'running' | 'needs_review' | 'error';
-
-type PetChatMessage = {
-  id: string;
-  speaker: 'agent' | 'user';
-  text: string;
-  tone?: PetDisplayState | 'review' | 'completed';
-};
-
-function trimPetMessages(messages: PetChatMessage[]) {
-  const deduped = messages.filter((message, index, collection) => collection.findIndex((item) => item.id === message.id) === index);
-  return deduped.slice(-3);
+function PanelWindowShell({ panel, children }: { panel: PanelWindow; children: React.ReactNode }) {
+  return (
+    <main className={`panel-window-shell panel-window-${panel}`}>
+      {children}
+    </main>
+  );
 }
 
-function excerptPetText(text: string, maxLength = 190) {
-  const compact = text.replace(/\s+/g, ' ').trim();
-  if (compact.length <= maxLength) return compact;
-  return `${compact.slice(0, maxLength - 1).trimEnd()}...`;
-}
-
-function isPetVisibleTimelineEvent(event: TimelineEvent) {
-  if (event.source === 'guild' || event.source === 'bridge') return false;
-  const normalized = event.message.toLowerCase();
-  return ![
-    'started hermes api run',
-    'hermes api streamed response text',
-    'hermes api run completed',
-    'captured final hermes output as a review artifact',
-  ].some((blocked) => normalized.includes(blocked));
-}
-
-export function getPetAgentResponse({
-  activeAgent,
-  activeQuest,
-  pendingReports,
-  tasks,
-  lastSubmittedTaskId,
+function CompanionContextMenu({
+  x,
+  y,
+  onOpenPanel,
 }: {
-  activeAgent: Agent;
-  activeQuest?: Task;
-  pendingReports: ReportCard[];
-  tasks: Task[];
-  lastSubmittedTaskId?: string;
-}): { key: string; state?: 'sent' | 'error'; message: PetChatMessage } | undefined {
-  const matchingReport = lastSubmittedTaskId
-    ? pendingReports.find((report) => report.taskId === lastSubmittedTaskId)
-    : pendingReports[0];
-
-  if (matchingReport) {
-    const reportTask = tasks.find((task) => task.id === matchingReport.taskId);
-    const artifactOutput = matchingReport.artifacts.find((artifact) => artifact.kind === 'summary')?.description;
-    const output = matchingReport.summary || artifactOutput;
-    if (!output) return undefined;
-    return {
-      key: `report-${matchingReport.id}-${matchingReport.summary.length}-${artifactOutput?.length ?? 0}`,
-      state: 'sent',
-      message: {
-        id: `agent-report-${matchingReport.id}`,
-        speaker: 'agent',
-        text: excerptPetText(output),
-        tone: reportTask?.state === 'approved' ? 'completed' : 'review',
-      },
-    };
-  }
-
-  const trackedTask = (lastSubmittedTaskId ? tasks.find((task) => task.id === lastSubmittedTaskId) : undefined) ?? activeQuest;
-  if (!trackedTask) return undefined;
-
-  if (trackedTask.state === 'error') {
-    const errorText = trackedTask.error ?? trackedTask.timeline.at(-1)?.message ?? 'Something needs attention.';
-    return {
-      key: `task-error-${trackedTask.id}-${trackedTask.updatedAt}-${errorText}`,
-      state: 'error',
-      message: {
-        id: `agent-error-${trackedTask.id}-${trackedTask.updatedAt}`,
-        speaker: 'agent',
-        text: excerptPetText(errorText, 150),
-        tone: 'error',
-      },
-    };
-  }
-
-  const latestUsefulEvent = [...trackedTask.timeline]
-    .reverse()
-    .find((event) => isPetVisibleTimelineEvent(event) && event.message.trim().length > 0);
-
-  if (latestUsefulEvent) {
-    const eventText = latestUsefulEvent.message;
-    return {
-      key: `task-event-${trackedTask.id}-${latestUsefulEvent.id}-${trackedTask.progress}`,
-      state: 'sent',
-      message: {
-        id: `agent-event-${latestUsefulEvent.id}`,
-        speaker: 'agent',
-        text: excerptPetText(eventText, 160),
-        tone: trackedTask.state === 'needs_review' ? 'review' : trackedTask.state === 'running' ? 'running' : 'thinking',
-      },
-    };
-  }
-
-  return undefined;
-}
-
-function getPetDisplayState(activeAgent: Agent, activeQuest: Task | undefined, pendingReportCount: number): PetDisplayState {
-  if (activeQuest?.state === 'error' || activeAgent.status === 'error') return 'error';
-  if (pendingReportCount > 0 || activeAgent.status === 'needs_review') return 'needs_review';
-  if (activeQuest?.state === 'running' || activeAgent.status === 'running') return 'running';
-  if (activeQuest?.state === 'created' || activeQuest?.state === 'assigned' || activeAgent.status === 'thinking') return 'thinking';
-  return 'idle';
-}
-
-function getPetAvatarAssetClass(role: Agent['role'], petState: PetDisplayState) {
-  const roleAsset = role === 'Builder' ? 'builder' : role === 'Reviewer' ? 'scribe' : role === 'Researcher' ? 'scout' : 'gatherer';
-  const stateAsset = petState === 'needs_review' ? 'needs-review' : petState === 'running' ? 'running' : petState === 'error' ? 'error' : 'idle';
-  return `pet-avatar-${roleAsset}-${stateAsset}`;
-}
-
-interface GuildHallProps {
-  agents: Agent[];
-  activeAgent: Agent;
-  activeQuest?: Task;
-  pendingReports: ReportCard[];
-  tasks: Task[];
-  systemStatus: SystemStatus;
-  bridgeConfig: BridgeConfig;
-  onSelectAgent: (agentId: string) => void;
-  onOpenTask: (taskId: string) => void;
-  onOpenBoard: () => void;
-  onOpenReview: () => void;
-  onBridgeConfigChange: (config: BridgeConfig) => void;
-  onApplyBridgeConfig: () => void;
-  revisionText: string;
-  onRevisionText: (value: string) => void;
-  onApprove: (reportId: string) => void;
-  onRevise: (reportId: string) => void;
-  commandValue: string;
-  onCommandValue: (value: string) => void;
-  onCreateQuest: () => void;
-  onStopTask: (taskId: string) => void | Promise<void>;
-  bridgeReady: boolean;
-}
-
-function GuildHall({
-  agents,
-  activeAgent,
-  activeQuest,
-  pendingReports,
-  tasks,
-  systemStatus,
-  bridgeConfig,
-  onSelectAgent,
-  onOpenTask,
-  onOpenBoard,
-  onOpenReview,
-  onBridgeConfigChange,
-  onApplyBridgeConfig,
-  revisionText,
-  onRevisionText,
-  onApprove,
-  onRevise,
-  commandValue,
-  onCommandValue,
-  onCreateQuest,
-  onStopTask,
-  bridgeReady,
-}: GuildHallProps) {
-  const latestReport = pendingReports[0];
-  const latestReportTask = tasks.find((task) => task.id === latestReport?.taskId);
-  const logTask = activeQuest ?? latestReportTask ?? tasks[0];
-  const recentEvents = logTask?.timeline.slice(-4).reverse() ?? [];
-  const reportProvenance = latestReportTask?.timeline.some((event) => event.source === 'hermes') ? 'Real Hermes output' : 'Mock / Guild-generated report';
-  const activeTaskRelation = activeQuest?.title ?? latestReportTask?.title ?? 'Standing by';
-  const activeQuestCount = tasks.filter((task) => task.state === 'running' || task.state === 'assigned').length;
-  const logEntries = recentEvents.map((event) => ({
-    id: event.id,
-    title: questLogLabel[event.type] ?? event.type.replaceAll('_', ' '),
-    detail: event.message,
-    time: new Date(event.timestamp).toLocaleTimeString(),
-    status: event.type,
-  }));
-  const guildLogEntries =
-    logEntries.length > 0
-      ? logEntries
-      : [
-          {
-            id: 'guild-ready',
-            title: `${activeAgent.name} ready`,
-            detail: `New quests assign to ${activeAgent.name} unless reassigned.`,
-            time: 'Now',
-            status: activeAgent.status,
-          },
-          {
-            id: 'guild-bridge',
-            title: 'Bridge checked',
-            detail: `${systemStatus.bridgeMode} mode using ${getExecutionSource(systemStatus)}.`,
-            time: 'Live',
-            status: systemStatus.activeImplementation,
-          },
-          {
-            id: 'guild-review',
-            title: 'Review inbox',
-            detail: `${pendingReports.length} returned quest${pendingReports.length === 1 ? '' : 's'} waiting.`,
-            time: 'Live',
-            status: pendingReports.length > 0 ? 'needs_review' : 'idle',
-          },
-        ];
-  const bridgeModeLabel = systemStatus.bridgeMode.slice(0, 1).toUpperCase() + systemStatus.bridgeMode.slice(1);
-  const bridgeFallbackLabel = systemStatus.fallbackReason
-    ? systemStatus.activeImplementation === 'mock'
-      ? 'Mock fallback'
-      : 'Fallback active'
-    : getExecutionSource(systemStatus);
-  const bridgeHealthLabel = `Hermes ${systemStatus.hermesAvailable}`;
-  const operationalRows = getOperationalStatusRows(systemStatus);
-  const suggestedPrompts = ['Prepare a demo brief', 'Summarize recent notes', 'Review returned quests'];
-  const updateBridgeMode = (bridgeMode: BridgeMode) => onBridgeConfigChange({ ...bridgeConfig, bridgeMode });
-  const updateGatewayBaseUrl = (hermesApiBaseUrl: string) => onBridgeConfigChange({ ...bridgeConfig, hermesApiBaseUrl });
-  const updateDashboardBaseUrl = (hermesDashboardBaseUrl: string) => onBridgeConfigChange({ ...bridgeConfig, hermesDashboardBaseUrl });
-  const updateSidecarBaseUrl = (hermesSidecarBaseUrl: string) => onBridgeConfigChange({ ...bridgeConfig, hermesSidecarBaseUrl });
-
-  return (
-    <PixelAppWindow
-      className="pixel-guild-window"
-      title="Hermes Guild"
-      subtitle="Guild Hall · Companion Workbench"
-      status={
-        <details className="pixel-bridge-status">
-          <summary>
-            <span>Bridge:</span> {bridgeModeLabel} · {bridgeFallbackLabel}
-          </summary>
-          <div className="pixel-bridge-settings">
-            <label>
-              Bridge mode
-              <PixelSelect value={bridgeConfig.bridgeMode} onChange={(bridgeMode) => updateBridgeMode(bridgeMode as BridgeMode)} ariaLabel="Bridge mode">
-                <option value="mock">mock</option>
-                <option value="auto">auto</option>
-                <option value="real">real</option>
-              </PixelSelect>
-            </label>
-            <label>
-              Gateway REST
-              <PixelInput value={bridgeConfig.hermesApiBaseUrl} onChange={updateGatewayBaseUrl} ariaLabel="Hermes gateway base URL" />
-            </label>
-            <label>
-              Dashboard compatibility
-              <PixelInput value={bridgeConfig.hermesDashboardBaseUrl} onChange={updateDashboardBaseUrl} ariaLabel="Hermes dashboard compatibility base URL" />
-            </label>
-            <label>
-              Sidecar compatibility
-              <PixelInput value={bridgeConfig.hermesSidecarBaseUrl} onChange={updateSidecarBaseUrl} ariaLabel="Hermes sidecar compatibility base URL" />
-            </label>
-            <PixelButton type="button" tone="ghost" onClick={onApplyBridgeConfig} disabled={!bridgeReady}>
-              Save
-            </PixelButton>
-            <PixelBadge status={systemStatus.activeImplementation}>{bridgeHealthLabel}</PixelBadge>
-            <PixelBadge status={systemStatus.dashboardAvailable === 'available' ? 'real' : 'mock'}>
-              Dashboard {systemStatus.dashboardAvailable ?? 'unchecked'}
-            </PixelBadge>
-            <PixelBadge status={systemStatus.sidecarAvailable === 'available' ? 'real' : 'mock'}>
-              Sidecar {systemStatus.sidecarAvailable ?? 'unchecked'}
-            </PixelBadge>
-            {operationalRows.length > 0 && (
-              <div className="pixel-operational-status" aria-label="Hermes operational data">
-                {operationalRows.map((row) => (
-                  <span key={row.label}>
-                    <strong>{row.label}</strong>
-                    {row.value}
-                    <em>{row.source}</em>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </details>
-      }
-      toolbar={
-        <div className="pixel-main-toolbar">
-          <span>Guild Hall</span>
-          <div>
-            <PixelButton type="button" tone="ghost" onClick={onOpenBoard}>
-              <PixelIcon name="quest-board" size={18} /> Quest Board
-            </PixelButton>
-            <PixelButton type="button" tone="ghost" onClick={onOpenReview}>
-              <PixelIcon name="review" size={18} /> Review
-              {pendingReports.length > 0 && <strong className="pixel-toolbar-count">{pendingReports.length}</strong>}
-            </PixelButton>
-          </div>
-        </div>
-      }
-      commandBar={
-        <PixelCommandBar
-          value={commandValue}
-          onChange={onCommandValue}
-          onSubmit={onCreateQuest}
-          disabled={!bridgeReady}
-          hint={`${activeAgent.name} / ${activeAgent.role}`}
-          placeholder="Ask Hermes to do something..."
-          secondaryAction={
-            <PixelButton type="button" tone="secondary" onClick={onOpenReview}>
-              <PixelIcon name="review" size={18} /> Review
-            </PixelButton>
-          }
-        />
-      }
-    >
-      <header className="pixel-guild-summary">
-        <div>
-          <h1>Guild Hall</h1>
-          <p>{activeAgent.name} is ready for direct quest work. Returned results stay one review action away.</p>
-        </div>
-        <div className="pixel-guild-kpis" aria-label="Guild Hall summary">
-          <span>
-            <strong>{pendingReports.length}</strong>
-            pending review{pendingReports.length === 1 ? '' : 's'}
-          </span>
-          <span>
-            <strong>{activeQuestCount}</strong>
-            active quest{activeQuestCount === 1 ? '' : 's'}
-          </span>
-        </div>
-      </header>
-
-      <section className="pixel-guild-layout">
-        <PixelPanel className="pixel-companion-card" title="Active Companion" icon={<PixelIcon name="companion" size={20} />}>
-          <div className="pixel-companion-top">
-            <PixelAvatar
-              className="pixel-companion-portrait"
-              name={activeAgent.name}
-              role={activeAgent.role}
-              status={activeAgent.status}
-            />
-            <div>
-              <h2>{activeAgent.name}</h2>
-              <p>{activeAgent.role} class</p>
-              <PixelBadge status={activeAgent.status}>{statusLabel[activeAgent.status]}</PixelBadge>
-            </div>
-          </div>
-          <p className="pixel-companion-line">
-            {statusLabel[activeAgent.status]} beside the command desk. New quests assign to this profile unless reassigned.
-          </p>
-          <div className="pixel-inset-note">
-            <strong>Focus</strong>
-            <p>{activeAgent.traits.slice(0, 2).join(' & ')}</p>
-          </div>
-          <div className="pixel-inset-note">
-            <strong>Current task</strong>
-            <p>{activeTaskRelation}</p>
-          </div>
-          <div className="pixel-companion-footer">
-            <PixelBadge status={activeAgent.executionRouting === 'supported' ? 'real' : 'mock'}>
-              {getProfileRoutingLabel(systemStatus, activeAgent)}
-            </PixelBadge>
-            <label className="pixel-field-label pixel-profile-switcher">
-              Switch
-              <PixelSelect value={activeAgent.id} onChange={onSelectAgent} ariaLabel="Active companion">
-                {agents.map((agent) => (
-                  <option key={agent.id} value={agent.id}>
-                    {agent.name} - {agent.role}
-                  </option>
-                ))}
-              </PixelSelect>
-            </label>
-          </div>
-        </PixelPanel>
-
-        <PixelQuestCard
-          title={activeQuest?.title ?? 'No active quest'}
-          brief={activeQuest?.brief ?? `Ask ${activeAgent.name} to start from the command box below.`}
-          currentStep={
-            activeQuest?.timeline.at(-1)?.message ??
-            `${activeAgent.name} is ready. Choose a suggested quest or type a new command below.`
-          }
-          progress={activeQuest?.progress ?? 0}
-          state={activeQuest?.state ?? 'idle'}
-          empty={!activeQuest}
-          suggestions={suggestedPrompts}
-          onSuggestionSelect={onCommandValue}
-          action={
-            activeQuest ? (
-              <div className="pixel-review-actions">
-                <PixelButton onClick={() => onOpenTask(activeQuest.id)}>
-                  <PixelIcon name="quest-log" size={18} /> Open Quest Log
-                </PixelButton>
-                {activeQuest.state === 'running' && (
-                  <PixelButton tone="danger" onClick={() => onStopTask(activeQuest.id)}>
-                    Stop Run
-                  </PixelButton>
-                )}
-              </div>
-            ) : (
-              <PixelButton tone="secondary" onClick={onOpenReview}>
-                <PixelIcon name="review" size={18} /> Review Returned Quests
-              </PixelButton>
-            )
-          }
-        />
-
-        <aside className="pixel-guild-side">
-          <PixelReviewCard
-            title={latestReport ? latestReport.title.replace(/^Quest Completed:\s*/i, '') : 'No report waiting'}
-            summary={latestReport ? latestReport.summary : 'Returned quests appear here with approve and revise actions.'}
-            artifact={latestReport?.artifacts[0]?.title ?? undefined}
-            provenance={latestReport ? reportProvenance : 'No returned output'}
-            pendingCount={pendingReports.length}
-            actions={
-              latestReport ? (
-                <div className="pixel-review-actions">
-                  <PixelButton tone="success" onClick={() => onApprove(latestReport.id)}>
-                    <PixelIcon name="approved" size={18} /> Approve
-                  </PixelButton>
-                  <PixelButton tone="secondary" onClick={() => onRevise(latestReport.id)}>
-                    <PixelIcon name="revise" size={18} /> Revise
-                  </PixelButton>
-                  <PixelInput value={revisionText} onChange={onRevisionText} multiline rows={2} ariaLabel="Revision instructions" />
-                </div>
-              ) : (
-                <PixelButton tone="secondary" onClick={onOpenReview}>
-                  Open Review Chamber
-                </PixelButton>
-              )
-            }
-          />
-
-          <PixelPanel title="Quest Log" icon={<PixelIcon name="quest-log" size={18} />} compact>
-            <PixelLogList entries={guildLogEntries} emptyText="Recent field notes appear after a quest starts." />
-            {logTask && (
-              <PixelButton tone="ghost" onClick={() => onOpenTask(logTask.id)}>
-                <PixelIcon name="chevron" size={16} /> View Full Log
-              </PixelButton>
-            )}
-          </PixelPanel>
-        </aside>
-
-        <PixelTruthStrip
-          mode={systemStatus.bridgeMode}
-          implementation={systemStatus.activeImplementation}
-          execution={getExecutionSource(systemStatus)}
-          hermes={systemStatus.hermesAvailable}
-          fallback={systemStatus.fallbackReason}
-          profileSource={getProfileSource(systemStatus, activeAgent)}
-        />
-      </section>
-    </PixelAppWindow>
-  );
-}
-
-function AgentCard({ agent, active, currentTask, onSelect }: { agent: Agent; active: boolean; currentTask?: Task; onSelect: () => void }) {
-  const Icon = roleIcon[agent.role];
-  return (
-    <article className={`agent-card ${active ? 'active' : ''}`}>
-      <div className="agent-card-header">
-        <div className="party-emblem">
-          <Icon size={22} />
-        </div>
-        <button onClick={onSelect}>{active ? 'Active Pet' : 'Assign Pet'}</button>
-      </div>
-      <h3>{agent.name}</h3>
-      <p>{agent.role} class</p>
-      <div className={`state-pill ${agent.status}`}>{statusLabel[agent.status]}</div>
-      <div className="current-quest">
-        <strong>Current quest</strong>
-        <span>{currentTask?.title ?? 'Standing by'}</span>
-      </div>
-      <dl>
-        <dt>Traits</dt>
-        <dd>{agent.traits.join(', ')}</dd>
-        <dt>Best for</dt>
-        <dd>{agent.bestFor}</dd>
-        <dt>Equipment</dt>
-        <dd>{agent.equipment.join(', ')}</dd>
-      </dl>
-      <div className="truth-label">
-        Profile source: {agent.source ?? 'unavailable'} · Routing: {agent.executionRouting ?? 'unknown'}
-      </div>
-    </article>
-  );
-}
-
-interface QuestBoardProps {
-  agents: Agent[];
-  tasks: Task[];
-  selectedTask?: Task;
-  systemStatus: SystemStatus;
-  boardInput: string;
-  boardGoals: string;
-  boardNonGoals: string;
-  boardContext: string;
-  boardDefinitionOfDone: string;
-  boardAssignee: string;
-  onBoardInput: (value: string) => void;
-  onBoardGoals: (value: string) => void;
-  onBoardNonGoals: (value: string) => void;
-  onBoardContext: (value: string) => void;
-  onBoardDefinitionOfDone: (value: string) => void;
-  onBoardAssignee: (value: string) => void;
-  onCreateQuest: () => void;
-  onSelectTask: (taskId: string) => void;
-  onStopTask: (taskId: string) => void | Promise<void>;
-  bridgeReady: boolean;
-}
-
-function QuestBoard({
-  agents,
-  tasks,
-  selectedTask,
-  systemStatus,
-  boardInput,
-  boardGoals,
-  boardNonGoals,
-  boardContext,
-  boardDefinitionOfDone,
-  boardAssignee,
-  onBoardInput,
-  onBoardGoals,
-  onBoardNonGoals,
-  onBoardContext,
-  onBoardDefinitionOfDone,
-  onBoardAssignee,
-  onCreateQuest,
-  onSelectTask,
-  onStopTask,
-  bridgeReady,
-}: QuestBoardProps) {
-  return (
-    <section className="pixel-board-layout">
-      <PixelPanel className="quest-post-panel" title="Quest Posting" icon={<PixelIcon name="feather-pen" size={20} />}>
-        <div className="quest-post-scroll">
-          <div className="quest-contract-note">
-            <PixelIcon name="seal" size={28} />
-            <span>
-              <strong>Quest Contract</strong>
-              <em>Brief the work, select a Hermes profile, then post it to the active bridge.</em>
-            </span>
-          </div>
-          <PixelInput
-            value={boardInput}
-            onChange={onBoardInput}
-            placeholder="Post a quest for the guild..."
-            multiline
-            rows={3}
-            ariaLabel="Quest brief"
-          />
-        <details className="advanced-intake pixel-advanced-brief">
-          <summary>Advanced brief</summary>
-          <label>
-            Goals
-            <PixelInput value={boardGoals} onChange={onBoardGoals} multiline rows={2} ariaLabel="Quest goals" />
-          </label>
-          <label>
-            Non-goals
-            <PixelInput value={boardNonGoals} onChange={onBoardNonGoals} multiline rows={2} ariaLabel="Quest non-goals" />
-          </label>
-          <label>
-            Context
-            <PixelInput value={boardContext} onChange={onBoardContext} multiline rows={2} ariaLabel="Quest context" />
-          </label>
-          <label>
-            Definition of done
-            <PixelInput value={boardDefinitionOfDone} onChange={onBoardDefinitionOfDone} multiline rows={2} ariaLabel="Definition of done" />
-          </label>
-        </details>
-        </div>
-        <div className="quest-post-actions">
-          <PixelSelect value={boardAssignee} onChange={onBoardAssignee} ariaLabel="Quest assignee">
-            {agents.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name} - {agent.role}
-              </option>
-            ))}
-          </PixelSelect>
-          <PixelButton onClick={onCreateQuest} disabled={!bridgeReady}>
-            <PixelIcon name="plus" size={18} /> Create Quest
-          </PixelButton>
-        </div>
-      </PixelPanel>
-
-      <PixelPanel className="quest-log-panel" title="Quest Board" icon={<PixelIcon name="quest-board" size={20} />}>
-        {tasks.length === 0 ? (
-          <div className="quest-board-empty">
-            <PixelIcon name="quest" size={42} />
-            <h3>No quests posted</h3>
-            <p>Draft a quest on the left and assign it to a Hermes profile.</p>
-            <span>Quest cards will show state, progress, and review readiness here.</span>
-          </div>
-        ) : (
-          tasks.map((task) => (
-            <button key={task.id} className={`quest-menu-item ${selectedTask?.id === task.id ? 'selected' : ''}`} onClick={() => onSelectTask(task.id)}>
-              <span>
-                <strong>{task.title}</strong>
-                <em>{task.brief}</em>
-              </span>
-              <PixelBadge status={task.state}>{statusLabel[task.state]} · {task.progress}%</PixelBadge>
-            </button>
-          ))
-        )}
-      </PixelPanel>
-
-      <TaskDetail
-        task={selectedTask}
-        agent={agents.find((agent) => agent.id === selectedTask?.assigneeId)}
-        systemStatus={systemStatus}
-        onStopTask={onStopTask}
-      />
-
-      <PixelTruthStrip
-        mode={systemStatus.bridgeMode}
-        implementation={systemStatus.activeImplementation}
-        execution={getExecutionSource(systemStatus)}
-        hermes={systemStatus.hermesAvailable}
-        fallback={systemStatus.fallbackReason}
-        profileSource={getProfileSource(systemStatus, agents.find((agent) => agent.activeInPet))}
-      />
-    </section>
-  );
-}
-
-function TaskDetail({
-  task,
-  agent,
-  systemStatus,
-  onStopTask,
-}: {
-  task?: Task;
-  agent?: Agent;
-  systemStatus: SystemStatus;
-  onStopTask?: (taskId: string) => void | Promise<void>;
+  x: number;
+  y: number;
+  onOpenPanel: (panel: PanelWindow) => void;
 }) {
-  if (!task) {
-    return (
-      <PixelPanel className="quest-detail-panel empty">
-        <div className="quest-detail-empty">
-          <PixelIcon name="document" size={42} />
-          <h3>No quest selected</h3>
-          <p>Select a quest from the board to inspect its contract, timeline, artifacts, and review state.</p>
-          <div>
-            <span>Timeline</span>
-            <span>Artifacts</span>
-            <span>Review state</span>
-          </div>
-        </div>
-      </PixelPanel>
-    );
-  }
-
   return (
-    <PixelPanel className="quest-detail-panel" title="Quest Detail" icon={<PixelIcon name="scroll" size={20} />}>
-      <div className="detail-header">
-        <div>
-          <h2>{task.title}</h2>
-          <p>{task.brief}</p>
-        </div>
-        <PixelBadge status={task.state}>{statusLabel[task.state]}</PixelBadge>
-      </div>
-      <div className="pixel-progress" aria-label={`Progress ${task.progress}%`}>
-        <span style={{ width: `${task.progress}%` }} />
-      </div>
-      <div className="detail-meta">
-        <span>Assignee: {agent ? `${agent.name} / ${agent.role}` : task.assigneeId}</span>
-        <span>Review: {task.reviewStatus.replaceAll('_', ' ')}</span>
-        <span>Execution: {getExecutionSource(systemStatus)}</span>
-        <span>Profile data: {getProfileSource(systemStatus, agent)}</span>
-        <span>Profile routing: {getProfileRoutingLabel(systemStatus, agent)}</span>
-        <span>Run id: {task.hermesRunId ?? 'unavailable'}</span>
-      </div>
-      {task.state === 'running' && (
-        <div className="detail-actions">
-          <PixelButton tone="danger" onClick={() => onStopTask?.(task.id)} disabled={!onStopTask}>
-            Stop Gateway Run
-          </PixelButton>
-        </div>
-      )}
-      {(task.goals || task.nonGoals || task.context || task.definitionOfDone) && (
-        <div className="brief-notes">
-          {task.goals && (
-            <div>
-              <strong>Goals</strong>
-              <p>{task.goals}</p>
-            </div>
-          )}
-          {task.nonGoals && (
-            <div>
-              <strong>Non-goals</strong>
-              <p>{task.nonGoals}</p>
-            </div>
-          )}
-          {task.context && (
-            <div>
-              <strong>Context</strong>
-              <p>{task.context}</p>
-            </div>
-          )}
-          {task.definitionOfDone && (
-            <div>
-              <strong>Definition of done</strong>
-              <p>{task.definitionOfDone}</p>
-            </div>
-          )}
-        </div>
-      )}
-      {task.error && <div className="error-box">{task.error}</div>}
-      <div className="artifact-strip">
-        {task.artifacts.map((artifact) => (
-          <div key={artifact.id}>
-            <strong>{artifact.title}</strong>
-            <span>{artifact.description}</span>
-          </div>
-        ))}
-      </div>
-      <ol className="timeline">
-        {task.timeline.map((event) => (
-          <li key={event.id}>
-            <span className={`timeline-type ${event.type}`} />
-            <div>
-              <strong>{questLogLabel[event.type] ?? event.type.replaceAll('_', ' ')}</strong>
-              <p>{event.message}</p>
-              <time>
-                {new Date(event.timestamp).toLocaleTimeString()} / {event.source}
-              </time>
-            </div>
-          </li>
-        ))}
-      </ol>
-    </PixelPanel>
+    <nav className="companion-context-menu" style={{ left: x, top: y }} aria-label="Companion menu" onPointerDown={(event) => event.stopPropagation()}>
+      <button type="button" onClick={() => onOpenPanel('companions')}>
+        <UserRound aria-hidden="true" />
+        <span>Companions</span>
+      </button>
+      <button type="button" onClick={() => onOpenPanel('appearance')}>
+        <Feather aria-hidden="true" />
+        <span>Appearance</span>
+      </button>
+      <button type="button" onClick={() => onOpenPanel('settings')}>
+        <Settings aria-hidden="true" />
+        <span>Settings</span>
+      </button>
+    </nav>
   );
 }
 
-interface ReviewChamberProps {
-  reports: ReportCard[];
-  tasks: Task[];
-  agents: Agent[];
-  revisionText: string;
-  onRevisionText: (value: string) => void;
-  onApprove: (reportId: string) => void;
-  onRevise: (reportId: string) => void;
-}
-
-function ReviewChamber({ reports, tasks, agents, revisionText, onRevisionText, onApprove, onRevise }: ReviewChamberProps) {
-  if (reports.length === 0) {
-    return (
-      <section className="review-empty-surface">
-        <PixelPanel className="review-inbox-panel" title="Review Inbox" icon={<PixelIcon name="review" size={20} />}>
-          <div className="review-empty-list">
-            <PixelIcon name="returned" size={40} />
-            <h2>No returned quests</h2>
-            <p>Completed Hermes outputs will queue here for approve or revise.</p>
-          </div>
-        </PixelPanel>
-        <PixelPanel className="review-detail-panel empty" title="Result Slip" icon={<PixelIcon name="report" size={20} />} variant="review">
-          <div className="review-empty-detail">
-            <PixelIcon name="scroll" size={44} />
-            <h3>Awaiting report card</h3>
-            <p>When a quest returns, this surface shows summary, artifacts, facts, assumptions, gaps, provenance, and review actions.</p>
-            <div>
-              <span>Approve</span>
-              <span>Revise</span>
-              <span>Provenance</span>
-            </div>
-          </div>
-        </PixelPanel>
-      </section>
-    );
-  }
+function CompanionsPopover({
+  open,
+  runtime,
+  onClose,
+  onSelect,
+  onToggleVisibility,
+  onAddCompanion,
+}: {
+  open: boolean;
+  runtime: CompanionRuntimeState;
+  onClose: () => void;
+  onSelect: (id: string) => void;
+  onToggleVisibility: (id: string) => void;
+  onAddCompanion: () => void;
+}) {
+  if (!open) return null;
 
   return (
-    <section className="review-list">
-      {reports.map((report) => {
-        const task = tasks.find((item) => item.id === report.taskId);
-        const agent = agents.find((item) => item.id === report.agentId);
-        const locked = !isActionableReportTask(task);
-        const reportTitle = report.title.replace(/^Quest Completed:\s*/i, '');
-
-        return (
-          <PixelPanel
-            key={report.id}
-            className={`report-card ${locked ? 'locked' : ''}`}
-            title="Quest Report Card"
-            icon={<PixelIcon name="report" size={20} />}
-            variant="review"
-          >
-            <div className="report-header">
-              <div>
-                <p className="eyebrow">{agent ? `${agent.name} / ${agent.role}` : report.agentId}</p>
-                <h2>Quest Completed: {reportTitle}</h2>
-                <p>{report.summary}</p>
-              </div>
-              <PixelBadge status={task?.reviewStatus ?? 'unchecked'}>{task?.reviewStatus.replaceAll('_', ' ') ?? 'missing task'}</PixelBadge>
-            </div>
-            <div className="provenance-box">
-              <strong>Output provenance</strong>
-              <span>{task?.timeline.some((event) => event.source === 'hermes') ? 'Real Hermes output' : 'Mock / Guild-generated report'}</span>
-            </div>
-            <div className="reward-grid">
-              {report.artifacts.map((artifact) => (
-                <div key={artifact.id}>
-                  <strong>{artifact.title}</strong>
-                  <span>{artifact.description}</span>
-                </div>
-              ))}
-            </div>
-            <ReportSection title="Facts" items={report.facts} />
-            <ReportSection title="Assumptions" items={report.assumptions} />
-            <ReportSection title="Known Gaps" items={report.knownGaps} />
-            <ReportSection title="Review Items" items={report.reviewItems} />
-            <div className="next-action">
-              <strong>Recommended next action</strong>
-              <p>{report.recommendedNextAction}</p>
-            </div>
-            {!locked && (
-              <div className="review-actions">
-                <PixelInput value={revisionText} onChange={onRevisionText} multiline rows={2} ariaLabel="Revision instructions" />
-                <PixelButton tone="success" onClick={() => onApprove(report.id)}>
-                  <PixelIcon name="approved" size={18} /> Approve
-                </PixelButton>
-                <PixelButton tone="secondary" onClick={() => onRevise(report.id)}>
-                  <PixelIcon name="revise" size={18} /> Revise
-                </PixelButton>
-              </div>
-            )}
-          </PixelPanel>
-        );
-      })}
+    <section className="glass-popover companions-popover" aria-label="Companions">
+      <PopoverHeader icon={<UserRound size={22} />} title="Companions" onClose={onClose} action={<Plus size={20} />} actionLabel="Add Companion" onAction={onAddCompanion} />
+      <div className="companion-list">
+        {runtime.companions.map((companion) => {
+          const appearance = runtime.appearances.find((item) => item.id === companion.appearanceId) ?? runtime.appearances[0];
+          return (
+            <article key={companion.id} className={`companion-row ${companion.id === runtime.selectedCompanionId ? 'selected' : ''}`}>
+              <button type="button" className="companion-row-main" onClick={() => onSelect(companion.id)}>
+                <img src={appearance.thumbnailUrl} alt="" />
+                <span>
+                  <strong>{companion.name}</strong>
+                  <small>{companion.description ?? companionSubtitles[companion.id] ?? 'Desktop companion'}</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={`switch ${companion.visible ? 'on' : ''}`}
+                onClick={() => onToggleVisibility(companion.id)}
+                aria-label={`${companion.visible ? 'Hide' : 'Show'} ${companion.name} on desktop`}
+              >
+                <span />
+              </button>
+            </article>
+          );
+        })}
+      </div>
+      <button type="button" className="popover-link" onClick={onAddCompanion}>
+        Add Companion
+        <ChevronRight size={18} aria-hidden="true" />
+      </button>
     </section>
   );
 }
 
-function ReportSection({ title, items }: { title: string; items: string[] }) {
+function AppearancePopover({
+  open,
+  companion,
+  appearance,
+  animation,
+  source,
+  onClose,
+  onNameChange,
+  onVisibilityChange,
+  onScaleChange,
+  onAnimationPreview,
+  onSourceChange,
+}: {
+  open: boolean;
+  companion: Companion;
+  appearance: CompanionAppearance;
+  animation: AnimationState;
+  source: AppearanceSource;
+  onClose: () => void;
+  onNameChange: (name: string) => void;
+  onVisibilityChange: (visible: boolean) => void;
+  onScaleChange: (scale: number) => void;
+  onAnimationPreview: (animation: AnimationState) => void;
+  onSourceChange: (source: AppearanceSource) => void;
+}) {
+  if (!open) return null;
+
   return (
-    <div className="report-section">
-      <h3>{title}</h3>
-      <ul>
-        {items.map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
+    <section className="glass-popover appearance-popover" aria-label="Appearance">
+      <PopoverHeader icon={<UserRound size={22} />} title="Appearance" onClose={onClose} />
+      <div className="appearance-grid">
+        <img className="portrait-preview" src={appearance.thumbnailUrl} alt={`${companion.name} portrait preview`} />
+        <label className="field-label">
+          <span>Name</span>
+          <span className="text-field">
+            <input value={companion.name} onChange={(event) => onNameChange(event.target.value)} aria-label="Name" />
+            <Edit3 size={18} aria-hidden="true" />
+          </span>
+        </label>
+      </div>
+      <label className="settings-row">
+        <span>Show on desktop</span>
+        <button type="button" className={`switch ${companion.visible ? 'on' : ''}`} onClick={() => onVisibilityChange(!companion.visible)} aria-label="Show on desktop">
+          <span />
+        </button>
+      </label>
+      <label className="size-row">
+        <span>Size</span>
+        <input type="range" min="0.62" max="1.18" step="0.01" value={companion.scale} onChange={(event) => onScaleChange(Number(event.target.value))} aria-label="Size" />
+        <strong>{Math.round(companion.scale * 100)}%</strong>
+      </label>
+      <div className="appearance-tabs" role="tablist" aria-label="Appearance source">
+        <button type="button" className={source === 'preset' ? 'active' : ''} role="tab" aria-selected={source === 'preset'} onClick={() => onSourceChange('preset')}>Preset</button>
+        <button type="button" className={source === 'generated' ? 'active' : ''} role="tab" aria-selected={source === 'generated'} onClick={() => onSourceChange('generated')}>Generate</button>
+        <button type="button" className={source === 'uploaded' ? 'active' : ''} role="tab" aria-selected={source === 'uploaded'} onClick={() => onSourceChange('uploaded')}>Upload</button>
+      </div>
+      <AppearanceSourceNotice source={source} />
+      <div className="animation-section">
+        <span className="section-label">Animation</span>
+        <div className="animation-grid">
+          {animationLabels.map(({ id, label, icon: Icon }) => (
+            <button key={id} type="button" className={animation === id ? 'active' : ''} onClick={() => onAnimationPreview(id)}>
+              <Icon size={23} aria-hidden="true" />
+              <span>{label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+      <SpriteSheetPreview appearance={appearance} />
+    </section>
+  );
+}
+
+function AppearanceSourceNotice({ source }: { source: AppearanceSource }) {
+  const Icon = source === 'preset' ? ImageIcon : source === 'generated' ? Sparkles : Upload;
+  return (
+    <div className="source-notice">
+      <Icon size={18} aria-hidden="true" />
+      <span>{getAppearanceSourceMessage(source)}</span>
     </div>
   );
 }
 
-function PixelShowcase() {
-  const showcaseIcons = [
-    'guild-hall',
-    'quest-board',
-    'review',
-    'quest',
-    'quest-log',
-    'report',
-    'companion',
-    'settings',
-    'diagnostics',
-    'bridge-real',
-    'bridge-mock',
-    'bridge-auto',
-    'hermes-available',
-    'hermes-unavailable',
-    'approved',
-    'revise',
-    'send',
-    'scroll',
-    'feather-pen',
-    'spark',
-  ] as const;
-  const sampleLogs = [
-    {
-      id: 'log-1',
-      title: 'Agent started work',
-      detail: 'Compiled source notes and scoped the returned brief.',
-      time: '09:12',
-    },
-    {
-      id: 'log-2',
-      title: 'Field note',
-      detail: 'Extracted positioning themes and pricing deltas.',
-      time: '09:18',
-    },
-    {
-      id: 'log-3',
-      title: 'Report drafted',
-      detail: 'Prepared artifact preview and review notes.',
-      time: '09:24',
-    },
-  ];
+function SpriteSheetPreview({ appearance }: { appearance: CompanionAppearance }) {
+  return (
+    <div className="sprite-section">
+      <span className="section-label">Sprite Sheet Preview</span>
+      <div className="sprite-grid" aria-label="Sprite Sheet Preview">
+        {Array.from({ length: appearance.framesPerRow * 4 }, (_, index) => (
+          <span key={index} className="sprite-frame">
+            <img src={appearance.spriteSheetUrl} alt="" />
+          </span>
+        ))}
+      </div>
+      <small>16 frames · {appearance.frameWidth}×{appearance.frameHeight} px</small>
+    </div>
+  );
+}
+
+function SettingsPopover({
+  open,
+  settings,
+  bridgeMode,
+  bridgeConfigMode,
+  bridgeUnavailable,
+  onClose,
+  onChange,
+}: {
+  open: boolean;
+  settings: AppSettings;
+  bridgeMode: ProviderMode;
+  bridgeConfigMode: BridgeMode;
+  bridgeUnavailable: boolean;
+  onClose: () => void;
+  onChange: (patch: Partial<AppSettings>) => void;
+}) {
+  if (!open) return null;
 
   return (
-    <div className="pixel-showcase">
-      <PixelAppWindow
-        title="Hermes Guild"
-        subtitle="Pixel UI Kit Showcase"
-        status={<PixelBadge status="auto">auto</PixelBadge>}
-        commandBar={
-          <PixelCommandBar
-            value=""
-            onChange={() => undefined}
-            onSubmit={() => undefined}
-            hint="Hermes / Researcher"
-            placeholder="What shall we do today?"
-          />
-        }
-      >
-        <div className="pixel-showcase-grid">
-          <PixelPanel title="Panel Variants">
-            <div className="pixel-showcase-row">
-              <PixelPanel compact title="Parchment">
-                <p className="pixel-muted">Parchment panel 9-slice</p>
-              </PixelPanel>
-              <PixelPanel compact title="Dark" variant="dark">
-                <p className="pixel-muted">Dark panel 9-slice</p>
-              </PixelPanel>
-              <PixelPanel compact title="Inset" variant="inset">
-                <p className="pixel-muted">Inset frame</p>
-              </PixelPanel>
-            </div>
-            <div className="pixel-showcase-row">
-              <PixelBadge status="idle">idle</PixelBadge>
-              <PixelBadge status="running">running</PixelBadge>
-              <PixelBadge status="needs_review">needs review</PixelBadge>
-              <PixelBadge status="error">error</PixelBadge>
-              <PixelBadge status="real">real</PixelBadge>
-              <PixelBadge status="mock">mock</PixelBadge>
-            </div>
-            <div className="pixel-showcase-row">
-              <PixelChip>Builder</PixelChip>
-              <PixelChip>Researcher</PixelChip>
-              <PixelChip>Reviewer</PixelChip>
-            </div>
-            <div className="pixel-showcase-row">
-              <PixelButton>Primary</PixelButton>
-              <PixelButton tone="secondary">Secondary</PixelButton>
-              <PixelButton tone="success">Approve</PixelButton>
-              <PixelButton tone="danger">Danger</PixelButton>
-              <PixelButton tone="ghost">Ghost</PixelButton>
-            </div>
-            <PixelInput value="" onChange={() => undefined} placeholder="Ask Hermes to do something..." />
-            <PixelInput value="" onChange={() => undefined} placeholder="Detailed quest notes..." multiline rows={3} />
-          </PixelPanel>
+    <section className="glass-popover settings-popover" aria-label="Settings">
+      <PopoverHeader icon={<Settings size={22} />} title="Settings" onClose={onClose} />
+      <SettingToggle icon={<Sparkles size={18} />} label="Launch at startup" checked={settings.launchAtStartup} onChange={(value) => onChange({ launchAtStartup: value })} />
+      <SettingToggle icon={<Eye size={18} />} label="Always on top" checked={settings.alwaysOnTop} onChange={(value) => onChange({ alwaysOnTop: value })} />
+      <SettingToggle icon={<Grid2X2 size={18} />} label="Remember positions" checked={settings.rememberPositions} onChange={(value) => onChange({ rememberPositions: value })} />
+      <SettingToggle icon={<Hand size={18} />} label="Allow dragging" checked={settings.allowDragging} onChange={(value) => onChange({ allowDragging: value })} />
+      <SettingToggle icon={<MessageCircle size={18} />} label="Show speech bubbles" checked={settings.showSpeechBubbles} onChange={(value) => onChange({ showSpeechBubbles: value })} />
+      <SettingToggle icon={<Moon size={18} />} label="Quiet mode" checked={settings.quietMode} onChange={(value) => onChange({ quietMode: value })} />
+      <SettingToggle icon={<Shield size={18} />} label="Click-through mode" checked={settings.clickThrough} onChange={(value) => onChange({ clickThrough: value })} />
+      <SettingToggle icon={<Bell size={18} />} label="Low resource mode" checked={settings.lowResourceMode} onChange={(value) => onChange({ lowResourceMode: value })} />
+      <div className={`bridge-state ${bridgeUnavailable ? 'unavailable' : ''}`}>
+        {bridgeUnavailable ? <WifiOff size={18} aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
+        <span>{getProviderStatusCopy(bridgeConfigMode, bridgeMode, bridgeUnavailable)}</span>
+      </div>
+    </section>
+  );
+}
 
-          <PixelPanel title="Avatar States">
-            <div className="pixel-showcase-row">
-              <PixelAvatar name="Lyra" role="Researcher" status="idle" />
-              <PixelAvatar name="Brass" role="Builder" status="running" />
-              <PixelAvatar name="Sable" role="Reviewer" status="needs_review" />
-              <PixelAvatar name="Moss" role="Gatherer" status="error" />
-            </div>
-            <div className="pixel-showcase-row">
-              <PixelMascot state="idle" label="Owl idle" />
-              <PixelMascot state="running" label="Owl running" />
-              <PixelMascot state="needs_review" label="Owl needs review" />
-              <PixelMascot state="error" label="Owl error" />
-            </div>
-          </PixelPanel>
+function SettingToggle({
+  icon,
+  label,
+  checked,
+  onChange,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}) {
+  return (
+    <label className="settings-row">
+      <span className="setting-label">{icon}{label}</span>
+      <button type="button" className={`switch ${checked ? 'on' : ''}`} onClick={() => onChange(!checked)} aria-label={label}>
+        <span />
+      </button>
+    </label>
+  );
+}
 
-          <PixelPanel title="Icon Catalog">
-            <div className="pixel-icon-grid">
-              {showcaseIcons.map((iconName) => (
-                <span key={iconName}>
-                  <PixelIcon name={iconName} size={42} label={iconName} />
-                  <small>{iconName}</small>
-                </span>
-              ))}
-            </div>
-          </PixelPanel>
+function PopoverHeader({
+  icon,
+  title,
+  action,
+  actionLabel,
+  onAction,
+  onClose,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  action?: React.ReactNode;
+  actionLabel?: string;
+  onAction?: () => void;
+  onClose: () => void;
+}) {
+  return (
+    <header className="popover-header" onPointerDown={handleNativeDragPointerDown}>
+      <span>{icon}<strong>{title}</strong></span>
+      <span className="popover-header-actions">
+        {action ? (
+          <button type="button" onClick={onAction} aria-label={actionLabel ?? `${title} action`}>
+            {action}
+          </button>
+        ) : null}
+        <button type="button" onClick={onClose} aria-label={`Close ${title}`}>
+          <X size={20} aria-hidden="true" />
+        </button>
+      </span>
+    </header>
+  );
+}
 
-          <PixelQuestCard
-            title="Market Research Brief"
-            brief="Compile insights on competitor pricing and positioning."
-            currentStep="Drafted insights and recommendations outline."
-            progress={68}
-            state="running"
-            action={<PixelButton>Continue Quest</PixelButton>}
-          />
-
-          <PixelReviewCard
-            title="market-research-brief.md"
-            summary="Well-structured brief with clear insights."
-            artifact="market-research-brief.md"
-            provenance="Real Hermes output"
-            pendingCount={1}
-            actions={
-              <div className="pixel-showcase-row">
-                <PixelButton tone="success">Approve</PixelButton>
-                <PixelButton tone="secondary">Revise</PixelButton>
-              </div>
-            }
-          />
-
-          <PixelPanel title="Quest Log">
-            <PixelLogList entries={sampleLogs} emptyText="No entries yet." />
-          </PixelPanel>
-
-          <PixelTruthStrip
-            mode="auto"
-            implementation="mock"
-            execution="Mock fallback"
-            hermes="unavailable"
-            fallback="Hermes API health request failed"
-            profileSource="Mock fallback roles"
-          />
-        </div>
-      </PixelAppWindow>
-    </div>
+function ChatInput({
+  value,
+  disabled,
+  onChange,
+  onSubmit,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  return (
+    <form className="chat-input-capsule" onSubmit={onSubmit}>
+      <Sparkles size={24} aria-hidden="true" />
+      <input
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Ask Hermes anything..."
+        aria-label="Ask Hermes anything"
+      />
+      <button type="submit" className="send-button" aria-label="Send message">
+        <Send size={22} aria-hidden="true" />
+      </button>
+    </form>
   );
 }
 

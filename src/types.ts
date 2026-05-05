@@ -13,6 +13,56 @@ export interface Skill {
   enabled: boolean;
 }
 
+export interface ProfileTextSection {
+  source: SystemDataSource;
+  path?: string;
+  text: string;
+  truncated?: boolean;
+  unavailableReason?: string;
+}
+
+export interface ProfileSkillSummary {
+  id: string;
+  name: string;
+  category?: string;
+  description?: string;
+  trigger?: string;
+  enabled?: boolean;
+  source: SystemDataSource;
+  path?: string;
+  unavailableReason?: string;
+}
+
+export interface ProfileSessionSummary {
+  id: string;
+  title: string;
+  source: SystemDataSource;
+  path?: string;
+  updatedAt?: string;
+  messageCount?: number;
+  unavailableReason?: string;
+}
+
+export interface ProfileDetailsSection<T> {
+  source: SystemDataSource;
+  path?: string;
+  items: T[];
+  unavailableReason?: string;
+}
+
+export interface ProfileDetails {
+  ok: boolean;
+  profileId: string;
+  profileName: string;
+  source: SystemDataSource;
+  path?: string;
+  soulMd: ProfileTextSection;
+  skills: ProfileDetailsSection<ProfileSkillSummary>;
+  sessions: ProfileDetailsSection<ProfileSessionSummary>;
+  loadedAt: string;
+  unavailableReason?: string;
+}
+
 export interface Agent {
   id: string;
   name: string;
@@ -202,4 +252,85 @@ export interface CreateTaskInput {
   nonGoals?: string;
   context?: string;
   definitionOfDone?: string;
+}
+
+export type CompanionStatus = 'idle' | 'thinking' | 'talking' | 'away' | 'hidden';
+export type AnimationState = 'idle' | 'talk' | 'think' | 'wave';
+export type AppearanceSource = 'preset' | 'generated' | 'uploaded';
+
+export interface Companion {
+  id: string;
+  name: string;
+  description?: string;
+  visible: boolean;
+  status: CompanionStatus;
+  appearanceId: string;
+  position: {
+    x: number;
+    y: number;
+  };
+  scale: number;
+  behavior: {
+    allowDrag: boolean;
+    showSpeechBubbles: boolean;
+    idleAtScreenEdge?: boolean;
+    clickThrough?: boolean;
+  };
+  agent?: {
+    agentId?: string;
+    provider?: string;
+    model?: string;
+  };
+}
+
+export interface CompanionAppearance {
+  id: string;
+  name: string;
+  source: AppearanceSource;
+  thumbnailUrl: string;
+  spriteSheetUrl: string;
+  frameWidth: number;
+  frameHeight: number;
+  rows: {
+    idle: number;
+    talk: number;
+    think: number;
+    wave: number;
+  };
+  framesPerRow: number;
+  fps: {
+    idle: number;
+    talk: number;
+    think: number;
+    wave: number;
+  };
+  background?: {
+    type: 'transparent' | 'chroma';
+    chromaKey?: string;
+  };
+}
+
+export interface AppSettings {
+  launchAtStartup: boolean;
+  alwaysOnTop: boolean;
+  rememberPositions: boolean;
+  allowDragging: boolean;
+  showSpeechBubbles: boolean;
+  quietMode: boolean;
+  clickThrough: boolean;
+  lowResourceMode: boolean;
+  theme: 'light' | 'dark' | 'system';
+}
+
+export interface ChatMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+}
+
+export interface ChatProvider {
+  sendMessage(input: {
+    companionId: string;
+    messages: ChatMessage[];
+  }): Promise<ChatMessage>;
 }

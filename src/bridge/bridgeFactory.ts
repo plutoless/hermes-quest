@@ -3,6 +3,7 @@ import { RealHermesBridge } from './realHermesBridge';
 import { createDefaultHermesApiClient, normalizeBaseUrl } from './hermesApiClient';
 import { createDefaultHermesDashboardApiClient } from './hermesDashboardApiClient';
 import { createDefaultHermesProfileClient } from './hermesProfileClient';
+import { createDefaultHermesProfileDetailsClient } from './hermesProfileDetailsClient';
 import { createDefaultHermesProfileRunClient } from './hermesProfileRunClient';
 import { createDefaultHermesSidecarClient } from './hermesSidecarClient';
 import type {
@@ -12,6 +13,7 @@ import type {
   HermesDashboardApiClient,
   HermesDashboardStatus,
   HermesProfileClient,
+  HermesProfileDetailsClient,
   HermesProfileListResult,
   HermesProfileRunClient,
   HermesSidecarClient,
@@ -32,6 +34,7 @@ interface BridgeFactoryOptions {
   dashboardClient?: HermesDashboardApiClient;
   sidecarClient?: HermesSidecarClient;
   profileClient?: HermesProfileClient;
+  profileDetailsClient?: HermesProfileDetailsClient;
   profileRunClient?: HermesProfileRunClient;
   persistMock?: boolean;
 }
@@ -59,6 +62,7 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
   const dashboardClient = options.dashboardClient ?? await createDefaultHermesDashboardApiClient(sanitized.hermesDashboardBaseUrl);
   const sidecarClient = options.sidecarClient ?? await createDefaultHermesSidecarClient(sanitized.hermesSidecarBaseUrl);
   const profileClient = options.profileClient ?? await createDefaultHermesProfileClient(sanitized.hermesSidecarBaseUrl);
+  const profileDetailsClient = options.profileDetailsClient ?? await createDefaultHermesProfileDetailsClient(sanitized.hermesSidecarBaseUrl);
   const profileRunClient = options.profileRunClient ?? await createDefaultHermesProfileRunClient();
 
   if (sanitized.bridgeMode === 'mock') {
@@ -74,7 +78,7 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
     });
   }
 
-  const realBridge = new RealHermesBridge(sanitized, apiClient, sidecarClient, profileRunClient);
+  const realBridge = new RealHermesBridge(sanitized, apiClient, sidecarClient, profileRunClient, profileDetailsClient);
   const health = await realBridge.getHealth?.();
   const dashboardStatus = health?.ok ? await dashboardClient.checkStatus() : undefined;
   const sidecarStatus = health?.ok ? await sidecarClient.checkHealth() : undefined;
