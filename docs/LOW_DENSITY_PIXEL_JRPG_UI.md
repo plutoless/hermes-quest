@@ -28,9 +28,9 @@ The existing RealHermes bridge must keep working.
 
 Do not break:
 
-- mock mode
 - real mode
 - auto mode
+- explicit test/dev mock harnesses
 - RealHermes run submission
 - RealHermes event reading
 - Quest Report Card generation
@@ -69,7 +69,7 @@ The user should understand these in 5 seconds:
 2. What quest is active?
 3. What happened recently?
 4. Is there something to review?
-5. Is the bridge real / mock / auto?
+5. Is the bridge real / auto / unavailable?
 
 ## Information Density Rules
 
@@ -174,7 +174,7 @@ Must show:
 
 - bridge mode
 - execution source
-- real / mock / auto status
+- real / auto / unavailable status
 - fallback if any
 
 Do not hide truth behind fantasy language.
@@ -209,7 +209,8 @@ Avoid dense game HUDs, map screens, big fantasy background art, noisy resource b
 - The command input is easy to find.
 - Integration truth is visible and honest.
 - RealHermes bridge still works.
-- mock / real / auto modes still work.
+- real / auto behavior still works.
+- explicit test/dev mock harnesses still work.
 - Review approve / revise still works.
 - README is updated if UI instructions changed.
 - EXECUTION_LOG is updated with what changed and validation results.

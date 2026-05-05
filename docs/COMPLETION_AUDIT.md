@@ -6,7 +6,7 @@ Audit date: 2026-05-04 02:35 CST
 
 ### Objective Restated
 
-Replace the subprocess RealHermesBridge with an API-first bridge while preserving MockHermesBridge and the existing pet -> quest -> timeline -> report card -> review loop. Real mode should call the Hermes API server, never silently fall back to mock, and auto mode should be the only mode that falls back to mock when Hermes is unavailable.
+Replace the subprocess RealHermesBridge with an API-first bridge while preserving MockHermesBridge for tests/development harnesses and the existing pet -> quest -> timeline -> report card -> review loop. Real mode should call the Hermes API server and unavailable Hermes state should not silently fall back to mock data.
 
 ### Checklist
 
@@ -17,8 +17,8 @@ Replace the subprocess RealHermesBridge with an API-first bridge while preservin
 | Keep MockHermesBridge working | Existing `src/bridge/mockHermesBridge.test.ts` still passes as part of `bun run verify:web`. | Verified |
 | Stable UI-facing bridge interface | `src/bridge/types.ts` defines `HermesBridgeApi`; mock and real bridges implement it. | Verified |
 | Add RealHermesBridge | `src/bridge/realHermesBridge.ts` implements the real adapter behind the shared interface. | Verified |
-| Add BridgeFactory / selection | `src/bridge/bridgeFactory.ts` supports `mock`, `real`, and `auto`; tests cover direct mock, real, auto-real, and auto-fallback. | Verified |
-| Auto fallback only | `bridgeFactory.test.ts` verifies failed auto health returns a mock bridge with visible `fallbackReason`; failed real health keeps `activeImplementation: real` and surfaces the actual failure. | Verified |
+| Add BridgeFactory / selection | `src/bridge/bridgeFactory.ts` supports bridge selection, but current guidance supersedes auto mock fallback as a product behavior. | Superseded |
+| Auto fallback only | Superseded: mock is now test/dev-harness only; normal runtime should surface unavailable/error instead. | Superseded |
 | Local config support | `loadBridgeConfig()` / `saveBridgeConfig()` persist `bridgeMode` and `hermesApiBaseUrl` in local storage. | Verified |
 | Required real bridge methods | `RealHermesBridge` includes `getHealth`, `listAgents`, `setActiveAgent`, `getActiveAgent`, `submitTask`, `getTask`, `reviseTask`, and `approveTask`. | Verified |
 | Pet and Quest Board tasks route through selected bridge | `src/App.tsx` calls `bridge.submitTask()` when the selected bridge supports it, and disables creation while bridge selection is loading. | Verified |
@@ -28,7 +28,7 @@ Replace the subprocess RealHermesBridge with an API-first bridge while preservin
 | Convert output to Quest Report Card | `bridgeFactory.test.ts` verifies API output appears in a Review report summary. | Verified |
 | Surface failures | `bridgeFactory.test.ts` verifies API failure updates task error, agent error state, error timeline, and system status. | Verified |
 | Show bridge status in UI | Structured `SystemStatus` fields expose selected mode, active implementation, Hermes availability, fallback reason, and API base URL; the top system strip renders them. | Verified |
-| Mock data is labeled | Mock mode and auto fallback expose mock implementation and fallback status; real mode uses Hermes-mapped role labels instead of mock character names. | Verified |
+| Mock data is labeled | Superseded: mock data should be confined to tests, fixtures, and explicit development harnesses. | Superseded |
 | README mode setup | `README.md` documents mock, real, auto, local storage config, Hermes API endpoints, selected-bridge task submission, visible fallback behavior, and error behavior. | Verified |
 | Do not expand excluded scope | No Tavern, Infirmary, Skill Deck, gateway UI, memory UI, workspace browser, redesign, or multi-agent orchestration files/features were added. | Verified |
 
@@ -40,7 +40,7 @@ Replace the subprocess RealHermesBridge with an API-first bridge while preservin
 ### Residual Risk
 
 - A live real-mode model task was not submitted in this audit to avoid consuming provider credits or transmitting a generated task prompt without an explicit separate confirmation.
-- Browser/Vite mode can call the Hermes API directly if the API server permits the request; CORS/network failures surface as real-mode errors or auto fallback reasons.
+- Browser/Vite mode can call the Hermes API directly if the API server permits the request; CORS/network failures should surface as unavailable/error reasons.
 - Real bridge converts selected `/v1/runs/{run_id}/events` SSE events into Guild timeline entries; blocked state remains Guild-maintained.
 
 ### Completion Status

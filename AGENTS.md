@@ -18,6 +18,7 @@ Implementation reference brief: `docs/REFERENCES.md`.
 ## Non-Negotiable Principles
 
 - RPG concepts must map to real Hermes state or behavior. Avoid fake stats, decorative levels, or card UI that does not represent useful data.
+- Mock data is test-only. It may be used in unit tests, development fixtures, and explicit test harnesses, but it must not be a normal product/runtime fallback. If Hermes data is unavailable, show a clear unavailable/error state instead of silently substituting mock data.
 - The game layer is an interaction model, not just a skin. In v0, it should make task assignment, progress tracking, and review easier.
 - Workflows stay efficient and serious. Do not add map traversal, cutscenes, or heavy game ceremony that slows down work.
 - Pet Mode must be high-frequency useful: one active profile pet in v0, quick input, status feedback, progress report, open Guild Hall, and task return cards.
@@ -131,6 +132,19 @@ Before treating an RPG state as real, identify its source:
 - Guild-maintained state: active profile, desktop position, task brief/goals/non-goals, direct assignment, review status, approve/revise actions, and user-facing timeline records.
 - Hermes-provided or bridge-derived state: profile identity, active session, execution logs, model/tool errors, artifact path, completion signal, and profile availability.
 - Guild-generated state: Quest Report Card, facts/assumptions/known gaps, trait display, quest summary, and timeline normalization.
+
+For Hermes-derived information, use this source precedence:
+
+1. Public official Hermes REST APIs.
+2. Hermes CLI.
+3. Safe local Hermes state.
+4. Hermes Guild Python sidecar.
+5. Guild-owned workflow state where the surface is truly owned by Guild.
+6. Unavailable with a concrete reason.
+
+Mock is not part of production source precedence. Keep mock behind tests, fixtures, and explicit development harnesses only.
+
+Selected-profile execution follows the same order. Public REST routing is preferred when Hermes advertises it. If REST lacks profile routing, a verified CLI route such as `hermes -p <profile> -z <prompt>` may be used through the loopback Guild sidecar. Never use `hermes profile use` or patch Hermes source to route a single task.
 
 If Hermes does not expose a signal yet, either route it through the bridge as a clearly derived state or leave the feature out of v0. Avoid UI that appears live but is not grounded in Hermes or Guild-owned state.
 

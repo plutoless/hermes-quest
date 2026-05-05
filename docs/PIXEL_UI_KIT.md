@@ -34,9 +34,9 @@ The existing RealHermes bridge must keep working.
 
 This UI Kit pass must not break:
 
-- mock mode
 - real mode
 - auto mode
+- explicit test/dev mock harnesses
 - RealHermes run submission
 - RealHermes event reading
 - Quest Report Card generation
@@ -410,7 +410,7 @@ Must show:
 
 - bridge mode
 - active implementation / execution source
-- real / mock / auto
+- real / auto / unavailable
 - fallback reason if any
 
 This must stay visible and honest.
@@ -523,7 +523,8 @@ This UI kit pass is successful when:
 - Text remains readable.
 - The UI kit does not break app behavior.
 - RealHermes bridge is not broken.
-- mock / real / auto modes are not broken.
+- real / auto behavior is not broken.
+- explicit test/dev mock harnesses are not broken.
 - build/typecheck/lint/test are run if available.
 
 ## Final Instruction

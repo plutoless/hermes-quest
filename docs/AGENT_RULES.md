@@ -52,7 +52,8 @@ Update it whenever you start, finish, block, drop, or change a task or milestone
 v0 includes:
 - one active desktop pet
 - direct profile assignment
-- mock Hermes Bridge first
+- real Hermes bridge for normal runtime
+- mock bridge only for tests, fixtures, and explicit development harnesses
 - Guild Hall
 - Quest Board
 - task timeline
@@ -73,6 +74,8 @@ v0 excludes:
 
 ## Decision Rule
 Do not silently change scope or architecture.
+
+Mock data must not be introduced as a product/runtime fallback. If a Hermes signal is unavailable, surface unavailable/error with a reason.
 
 If you make an important product, UX, technical, or architecture decision, record it in EXECUTION_LOG.md before continuing.
 

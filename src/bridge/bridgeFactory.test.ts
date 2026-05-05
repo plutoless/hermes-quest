@@ -1,6 +1,13 @@
 import { beforeEach, describe, expect, test } from 'bun:test';
 import { createBridgeFromConfig, loadBridgeConfig, saveBridgeConfig } from './bridgeFactory';
-import type { BridgeConfig, HermesApiClient, HermesDashboardApiClient } from './types';
+import type {
+  BridgeConfig,
+  HermesApiClient,
+  HermesDashboardApiClient,
+  HermesProfileClient,
+  HermesProfileRunClient,
+  HermesSidecarClient,
+} from './types';
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -8,6 +15,7 @@ const defaultConfig: BridgeConfig = {
   bridgeMode: 'auto',
   hermesApiBaseUrl: 'http://127.0.0.1:8642',
   hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
+  hermesSidecarBaseUrl: 'http://127.0.0.1:8765',
 };
 
 function installFakeStorage() {
@@ -34,6 +42,7 @@ function legacyConfigWithManualProfileName(name: string): BridgeConfig & { realP
     bridgeMode: 'real',
     hermesApiBaseUrl: 'http://127.0.0.1:8642',
     hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
+    hermesSidecarBaseUrl: 'http://127.0.0.1:8765',
     realProfileName: name,
   };
 }
@@ -68,6 +77,51 @@ function dashboardClient(status: { ok: boolean; message: string }, protectedAcce
   };
 }
 
+function sidecarClient(
+  status: { ok: boolean; message: string },
+  summary?: unknown,
+  runTask?: HermesSidecarClient['runTask'],
+): HermesSidecarClient {
+  return {
+    checkHealth: async () => status,
+    getCapabilities: async () => ({
+      ok: status.ok,
+      status: status.ok ? 200 : 503,
+      data: {
+        source_precedence: ['public-rest', 'cli', 'local-state', 'sidecar', 'guild-owned', 'unavailable'],
+      },
+    }),
+    getLocalStateSummary: async () => ({
+      ok: Boolean(summary),
+      status: summary ? 200 : 503,
+      data: summary ?? {},
+      error: summary ? undefined : 'local state unavailable',
+    }),
+    runTask,
+    getRun: async (runId) => ({
+      ok: true,
+      status: 200,
+      data: { ok: true, run_id: runId, status: 'completed' },
+    }),
+  };
+}
+
+function profileClient(input: Partial<Awaited<ReturnType<HermesProfileClient['listProfiles']>>>): HermesProfileClient {
+  return {
+    listProfiles: async () => ({
+      ok: input.ok ?? true,
+      profiles: input.profiles ?? [],
+      activeProfileId: input.activeProfileId,
+      source: input.source ?? 'cli',
+      message: input.message ?? 'profiles available',
+      executionRouting: input.executionRouting,
+      executionRoutingReason: input.executionRoutingReason,
+      executionRoutingSource: input.executionRoutingSource,
+      executionRoutingMode: input.executionRoutingMode,
+    }),
+  };
+}
+
 describe('bridgeFactory', () => {
   beforeEach(() => {
     installFakeStorage();
@@ -80,12 +134,14 @@ describe('bridgeFactory', () => {
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:9999',
       hermesDashboardBaseUrl: 'http://127.0.0.1:9229',
+      hermesSidecarBaseUrl: 'http://127.0.0.1:8877',
     });
 
     expect(loadBridgeConfig()).toEqual({
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:9999',
       hermesDashboardBaseUrl: 'http://127.0.0.1:9229',
+      hermesSidecarBaseUrl: 'http://127.0.0.1:8877',
     });
   });
 
@@ -103,6 +159,7 @@ describe('bridgeFactory', () => {
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:8642',
       hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
+      hermesSidecarBaseUrl: 'http://127.0.0.1:8765',
     });
   });
 
@@ -111,6 +168,7 @@ describe('bridgeFactory', () => {
       bridgeMode: 'auto',
       hermesApiBaseUrl: ' http://127.0.0.1:8642/ ',
       hermesDashboardBaseUrl: ' http://127.0.0.1:9119/ ',
+      hermesSidecarBaseUrl: ' http://127.0.0.1:8765/ ',
     });
 
     expect(loadBridgeConfig()).toEqual(defaultConfig);
@@ -124,11 +182,12 @@ describe('bridgeFactory', () => {
     expect(status.activeImplementation).toBe('mock');
     expect(status.hermesAvailable).toBe('unchecked');
     expect(status.dashboardAvailable).toBe('unchecked');
+    expect(status.sidecarAvailable).toBe('unchecked');
     expect(status.logsSummary).toContain('Mock Hermes Bridge');
     expect(status.warnings.some((warning) => warning.includes('Bridge mode: mock'))).toBe(true);
   });
 
-  test('auto mode falls back to mock when real Hermes health fails', async () => {
+  test('auto mode surfaces unavailable real bridge when Hermes health fails', async () => {
     const apiClient: HermesApiClient = {
       checkHealth: async () => ({ ok: false, message: 'Hermes API refused connection' }),
       runTask: async () => {
@@ -143,14 +202,17 @@ describe('bridgeFactory', () => {
     const status = bridge.getSnapshot().systemStatus;
 
     expect(status.bridgeMode).toBe('auto');
-    expect(status.activeImplementation).toBe('mock');
+    expect(status.activeImplementation).toBe('real');
     expect(status.hermesAvailable).toBe('unavailable');
-    expect(status.fallbackReason).toBe('Hermes API refused connection');
-    expect(status.gatewayStatus).toBe('mocked');
+    expect(status.fallbackReason).toBeUndefined();
+    expect(status.gatewayStatus).toBe('error');
     expect(status.hermesDashboardBaseUrl).toBe('http://127.0.0.1:9119');
     expect(status.dashboardAvailable).toBe('unchecked');
-    expect(status.logsSummary).toContain('fallback to mock');
-    expect(status.warnings).toContain('Auto mode fallback: Hermes API refused connection');
+    expect(status.sidecarAvailable).toBe('unchecked');
+    expect(status.logsSummary).toContain('Hermes API refused connection');
+    expect(status.logsSummary).not.toContain('fallback to mock');
+    expect(status.warnings).toContain('Real mode did not fall back to mock: Hermes API refused connection');
+    expect(bridge.getSnapshot().agents.map((agent) => agent.name)).toEqual(['Profile unavailable']);
   });
 
   test('auto mode uses real bridge when Hermes health passes without requiring protected dashboard REST', async () => {
@@ -194,6 +256,340 @@ describe('bridgeFactory', () => {
     expect(status.dataSources?.skills).toBe('unavailable');
     expect(status.warnings).toContain('Hermes dashboard compatibility unavailable: Dashboard refused connection');
     expect(status.logsSummary).toContain('Dashboard compatibility unavailable');
+  });
+
+  test('real mode probes sidecar as compatibility source without replacing gateway execution', async () => {
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient: {
+        checkHealth: async () => ({ ok: true, message: 'Gateway API healthy' }),
+        runTask: async () => ({ ok: true, output: 'real output', events: [] }),
+      },
+      dashboardClient: dashboardClient({ ok: false, message: 'Dashboard refused connection' }),
+      sidecarClient: sidecarClient({ ok: true, message: 'Sidecar healthy' }, {
+        source: 'local-state',
+        profiles: { count: 1, active_profile_id: 'builder' },
+        logs: { count: 2 },
+        env: { configured_keys: ['HERMES_API_KEY'], values: 'redacted' },
+      }),
+    });
+
+    const status = bridge.getSnapshot().systemStatus;
+
+    expect(status.activeImplementation).toBe('real');
+    expect(status.sidecarAvailable).toBe('available');
+    expect(status.hermesSidecarBaseUrl).toBe('http://127.0.0.1:8765');
+    expect(status.dataSources?.sidecar).toBe('sidecar');
+    expect(status.dataSources?.localStateSummary).toBe('sidecar');
+    expect(status.operationalData?.sidecarSummary).toContain('local state');
+    expect(status.operationalData?.sidecarSummary).not.toContain('HERMES_API_KEY=');
+  });
+
+  test('real mode lists profiles from CLI/profile adapter when REST health has no profile metadata', async () => {
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient: {
+        checkHealth: async () => ({ ok: true, message: 'Gateway API healthy' }),
+        runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+      },
+      dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      sidecarClient: sidecarClient({ ok: false, message: 'Sidecar unavailable' }),
+      profileClient: profileClient({
+        source: 'cli',
+        activeProfileId: 'frieren',
+        profiles: [
+          { id: 'default', name: 'default', source: 'cli' },
+          { id: 'frieren', name: 'frieren', source: 'cli' },
+          { id: 'rem', name: 'rem', source: 'cli' },
+        ],
+      }),
+    });
+
+    const snapshot = bridge.getSnapshot();
+
+    expect(snapshot.activeProfileId).toBe('frieren');
+    expect(snapshot.agents.map((agent) => agent.id)).toEqual(['default', 'frieren', 'rem']);
+    expect(snapshot.agents.find((agent) => agent.id === 'frieren')?.activeInPet).toBe(true);
+    expect(snapshot.systemStatus.dataSources?.profiles).toBe('cli');
+    expect(snapshot.systemStatus.dataSources?.activeProfile).toBe('cli');
+    expect(snapshot.systemStatus.dataSources?.profileRouting).toBe('unavailable');
+    expect(snapshot.systemStatus.operationalData?.profileSummary).toBe('3 profiles from cli');
+    expect(snapshot.systemStatus.operationalData?.profileRoutingSummary).toContain('unavailable');
+    expect(snapshot.agents.every((agent) => agent.executionRouting === 'unsupported')).toBe(true);
+  });
+
+  test('real mode keeps REST active profile metadata ahead of CLI profile list source', async () => {
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient: {
+        checkHealth: async () => ({
+          ok: true,
+          message: 'Gateway API healthy',
+          profile: { id: 'default', name: 'Default From REST', source: 'public-rest' },
+        }),
+        runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+      },
+      dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      sidecarClient: sidecarClient({ ok: false, message: 'Sidecar unavailable' }),
+      profileClient: profileClient({
+        source: 'cli',
+        activeProfileId: 'frieren',
+        profiles: [
+          { id: 'default', name: 'default', source: 'cli' },
+          { id: 'frieren', name: 'frieren', source: 'cli' },
+        ],
+      }),
+    });
+
+    const snapshot = bridge.getSnapshot();
+
+    expect(snapshot.activeProfileId).toBe('default');
+    expect(snapshot.agents.find((agent) => agent.id === 'default')?.name).toBe('Default From REST');
+    expect(snapshot.agents.find((agent) => agent.id === 'default')?.source).toBe('public-rest');
+    expect(snapshot.systemStatus.dataSources?.profiles).toBe('cli');
+    expect(snapshot.systemStatus.dataSources?.activeProfile).toBe('public-rest');
+    expect(snapshot.systemStatus.operationalData?.activeProfileSummary).toBe('Default From REST from public-rest');
+  });
+
+  test('real mode active profile switching updates selected assignment without rewriting task history', async () => {
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient: {
+        checkHealth: async () => ({ ok: true, message: 'Gateway API healthy' }),
+        runTask: async () => ({ ok: true, output: 'Done.', events: [] }),
+      },
+      dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      sidecarClient: sidecarClient({ ok: false, message: 'Sidecar unavailable' }),
+      profileClient: profileClient({
+        source: 'cli',
+        activeProfileId: 'default',
+        profiles: [
+          { id: 'default', name: 'default', source: 'cli' },
+          { id: 'frieren', name: 'frieren', source: 'cli' },
+        ],
+      }),
+    });
+
+    const firstTaskId = bridge.createTask({ brief: 'First task.', assigneeId: 'default', type: 'pet' });
+    bridge.setActiveProfile('frieren');
+    const secondTaskId = bridge.createTask({ brief: 'Second task.', assigneeId: bridge.getSnapshot().activeProfileId, type: 'pet' });
+    await wait(20);
+
+    const snapshot = bridge.getSnapshot();
+
+    expect(snapshot.activeProfileId).toBe('frieren');
+    expect(snapshot.agents.find((agent) => agent.id === 'default')?.activeInPet).toBe(false);
+    expect(snapshot.agents.find((agent) => agent.id === 'frieren')?.activeInPet).toBe(true);
+    expect(snapshot.tasks.find((task) => task.id === firstTaskId)?.assigneeId).toBe('default');
+    expect(snapshot.tasks.find((task) => task.id === secondTaskId)?.assigneeId).toBe('frieren');
+    expect(snapshot.tasks.find((task) => task.id === firstTaskId)?.profileContext?.profileName).toBe('default');
+    expect(snapshot.tasks.find((task) => task.id === secondTaskId)?.profileContext?.profileName).toBe('frieren');
+  });
+
+  test('real mode routes selected CLI profiles through sidecar when sidecar execution is verified', async () => {
+    const gatewayRuns: unknown[] = [];
+    const sidecarRuns: unknown[] = [];
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient: {
+        checkHealth: async () => ({ ok: true, message: 'Gateway API healthy' }),
+        runTask: async (input) => {
+          gatewayRuns.push(input);
+          return { ok: true, output: 'gateway output', events: [] };
+        },
+      },
+      dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      sidecarClient: sidecarClient(
+        { ok: true, message: 'Sidecar available' },
+        { source: 'local-state', profiles: { count: 2 } },
+        async (input) => {
+          sidecarRuns.push(input);
+          return {
+            ok: true,
+            output: 'sidecar profile output',
+            runId: 'sidecar-1',
+            events: [{ event: 'run.completed', output: 'sidecar profile output' }],
+            profileContext: {
+              profileId: input.profile?.id ?? 'frieren',
+              profileName: input.profile?.name ?? 'frieren',
+              source: 'cli',
+              routingSource: 'sidecar',
+              routingMode: 'sidecar',
+              sessionId: input.sessionId,
+              verified: true,
+            },
+          };
+        },
+      ),
+      profileClient: profileClient({
+        source: 'cli',
+        activeProfileId: 'frieren',
+        executionRouting: 'supported',
+        executionRoutingSource: 'sidecar',
+        executionRoutingMode: 'sidecar',
+        executionRoutingReason: 'Verified CLI route: hermes -p <profile> -z <prompt> scopes execution without changing sticky active profile.',
+        profiles: [{ id: 'frieren', name: 'frieren', source: 'cli', executionRouting: 'supported' }],
+      }),
+    });
+
+    const taskId = bridge.createTask({ brief: 'Use sidecar profile route.', assigneeId: 'frieren', type: 'pet' });
+    await wait(20);
+    const questBoardTaskId = bridge.createTask({ brief: 'Use sidecar profile route from board.', assigneeId: 'frieren', type: 'quest_board' });
+    await wait(20);
+    const snapshot = bridge.getSnapshot();
+    const task = snapshot.tasks.find((item) => item.id === taskId);
+    const questBoardTask = snapshot.tasks.find((item) => item.id === questBoardTaskId);
+
+    expect(gatewayRuns).toHaveLength(0);
+    expect(sidecarRuns).toHaveLength(2);
+    expect(snapshot.systemStatus.dataSources?.profileRouting).toBe('sidecar');
+    expect(snapshot.systemStatus.operationalData?.profileRoutingSummary).toContain('sidecar');
+    expect(task?.profileContext).toEqual({
+      profileId: 'frieren',
+      profileName: 'frieren',
+      source: 'cli',
+      routingSource: 'sidecar',
+      routingMode: 'sidecar',
+      sessionId: taskId,
+      verified: true,
+    });
+    expect(task?.hermesRunId).toBe('sidecar-1');
+    expect(task?.timeline.some((event) => event.message.includes('Profile context verified'))).toBe(true);
+    expect(questBoardTask?.type).toBe('quest_board');
+    expect(questBoardTask?.profileContext?.routingSource).toBe('sidecar');
+  });
+
+  test('real mode routes selected CLI profiles through native CLI when sidecar is unavailable', async () => {
+    const gatewayRuns: unknown[] = [];
+    const cliRuns: unknown[] = [];
+    const profileRunClient: HermesProfileRunClient = {
+      runTask: async (input) => {
+        cliRuns.push(input);
+        return {
+          ok: true,
+          output: 'native cli output',
+          runId: 'cli-1',
+          events: [{ event: 'run.completed', output: 'native cli output' }],
+          profileContext: {
+            profileId: input.profile?.id ?? 'frieren',
+            profileName: input.profile?.name ?? 'frieren',
+            source: 'cli',
+            routingSource: 'cli',
+            routingMode: 'cli',
+            sessionId: input.sessionId,
+            verified: true,
+          },
+        };
+      },
+    };
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient: {
+        checkHealth: async () => ({ ok: true, message: 'Gateway API healthy' }),
+        runTask: async (input) => {
+          gatewayRuns.push(input);
+          return { ok: true, output: 'gateway output', events: [] };
+        },
+      },
+      dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      sidecarClient: sidecarClient({ ok: false, message: 'Sidecar unavailable' }),
+      profileRunClient,
+      profileClient: profileClient({
+        source: 'cli',
+        activeProfileId: 'frieren',
+        executionRouting: 'supported',
+        executionRoutingSource: 'cli',
+        executionRoutingMode: 'cli',
+        executionRoutingReason: 'Verified CLI route.',
+        profiles: [{ id: 'frieren', name: 'frieren', source: 'cli', executionRouting: 'supported' }],
+      }),
+    });
+
+    const taskId = bridge.createTask({ brief: 'Use native CLI profile route.', assigneeId: 'frieren', type: 'pet' });
+    await wait(20);
+    const snapshot = bridge.getSnapshot();
+    const task = snapshot.tasks.find((item) => item.id === taskId);
+
+    expect(gatewayRuns).toHaveLength(0);
+    expect(cliRuns).toHaveLength(1);
+    expect(snapshot.systemStatus.dataSources?.profileRouting).toBe('cli');
+    expect(task?.profileContext?.routingSource).toBe('cli');
+    expect(task?.profileContext?.routingMode).toBe('cli');
+    expect(task?.timeline.some((event) => event.message.includes('Profile routing unavailable'))).toBe(false);
+  });
+
+  test('real mode records profile routing unavailable and does not send unsupported run profile fields', async () => {
+    const runBodies: Array<Record<string, unknown>> = [];
+    const apiClient: HermesApiClient = {
+      checkHealth: async () => ({ ok: true, message: 'Gateway API healthy' }),
+      runTask: async (input) => {
+        runBodies.push(input as unknown as Record<string, unknown>);
+        return { ok: true, output: 'Done.', events: [{ event: 'run.completed', output: 'Done.' }] };
+      },
+    };
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient,
+      dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      sidecarClient: sidecarClient({ ok: false, message: 'Sidecar unavailable' }),
+      profileClient: profileClient({
+        source: 'cli',
+        activeProfileId: 'frieren',
+        profiles: [{ id: 'frieren', name: 'frieren', source: 'cli' }],
+      }),
+    });
+
+    const taskId = bridge.createTask({ brief: 'Use selected profile.', assigneeId: 'frieren', type: 'pet' });
+    await wait(20);
+    const task = bridge.getSnapshot().tasks.find((item) => item.id === taskId);
+
+    expect(runBodies).toHaveLength(1);
+    expect(runBodies[0].profileId).toBeUndefined();
+    expect(runBodies[0].profile_id).toBeUndefined();
+    expect(runBodies[0].profileName).toBeUndefined();
+    expect(runBodies[0].profile_name).toBeUndefined();
+    expect(task?.timeline.some((event) => event.message.includes('Profile routing unavailable'))).toBe(true);
+    expect(bridge.getSnapshot().systemStatus.dataSources?.profileRouting).toBe('unavailable');
+  });
+
+  test('real mode uses public REST profiles and sends selected profile only when gateway routing is advertised', async () => {
+    const runInputs: Array<Record<string, unknown>> = [];
+    const apiClient: HermesApiClient = {
+      checkHealth: async () => ({ ok: true, message: 'Gateway API healthy' }),
+      listProfiles: async () => ({
+        ok: true,
+        source: 'public-rest',
+        activeProfileSource: 'public-rest',
+        activeProfileId: 'frieren',
+        profiles: [
+          { id: 'default', name: 'default', source: 'public-rest', executionRouting: 'supported' },
+          { id: 'frieren', name: 'frieren', source: 'public-rest', executionRouting: 'supported' },
+        ],
+        message: '2 profiles discovered from public REST.',
+        executionRouting: 'supported',
+      }),
+      runTask: async (input) => {
+        runInputs.push(input as unknown as Record<string, unknown>);
+        return { ok: true, output: 'Done.', events: [{ event: 'run.completed', output: 'Done.' }] };
+      },
+    };
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient,
+      dashboardClient: dashboardClient({ ok: false, message: 'Dashboard unavailable' }),
+      sidecarClient: sidecarClient({ ok: false, message: 'Sidecar unavailable' }),
+      profileClient: profileClient({
+        source: 'cli',
+        activeProfileId: 'default',
+        profiles: [{ id: 'default', name: 'default', source: 'cli' }],
+      }),
+    });
+
+    const taskId = bridge.createTask({ brief: 'Route via public REST.', assigneeId: 'frieren', type: 'pet' });
+    await wait(20);
+    const snapshot = bridge.getSnapshot();
+    const task = snapshot.tasks.find((item) => item.id === taskId);
+
+    expect(snapshot.activeProfileId).toBe('frieren');
+    expect(snapshot.systemStatus.dataSources?.profiles).toBe('public-rest');
+    expect(snapshot.systemStatus.dataSources?.profileRouting).toBe('public-rest');
+    expect(snapshot.systemStatus.operationalData?.profileRoutingSummary).toContain('supported');
+    expect(runInputs).toHaveLength(1);
+    expect(runInputs[0].profile).toEqual({ id: 'frieren', name: 'frieren', source: 'public-rest', role: 'Researcher', executionRouting: 'supported' });
+    expect(runInputs[0].profileRoutingSupported).toBe(true);
+    expect(task?.timeline.some((event) => event.message.includes('Profile routing unavailable'))).toBe(false);
   });
 
   test('real mode does not call protected dashboard compatibility endpoints without token access', async () => {

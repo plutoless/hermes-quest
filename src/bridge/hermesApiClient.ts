@@ -5,6 +5,7 @@ import type {
   HermesApiRunTaskResult,
   HermesEndpointResult,
   HermesHealth,
+  HermesProfileListResult,
   HermesProfileMetadata,
 } from './types';
 
@@ -42,6 +43,15 @@ export class FetchHermesApiClient implements HermesApiClient {
 
   async getCapabilities() {
     return this.getJson('/v1/capabilities');
+  }
+
+  async listProfiles(): Promise<HermesProfileListResult> {
+    const result = await this.getJson('/v1/profiles');
+    return profileListResultFromEndpoint(result);
+  }
+
+  async getActiveProfile() {
+    return this.getJson('/v1/profile/active');
   }
 
   async createChatCompletion(body: unknown) {
@@ -104,11 +114,7 @@ export class FetchHermesApiClient implements HermesApiClient {
     const start = await fetch(`${this.baseUrl}/v1/runs`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        input: input.input,
-        instructions: input.instructions,
-        session_id: input.sessionId,
-      }),
+      body: JSON.stringify(runStartBody(input)),
     });
     const startBody = await start.json().catch(() => ({}));
     if (!start.ok) {
@@ -200,6 +206,15 @@ export class NativeHermesApiClient implements HermesApiClient {
     return this.getJson('/v1/capabilities');
   }
 
+  async listProfiles(): Promise<HermesProfileListResult> {
+    const result = await this.getJson('/v1/profiles');
+    return profileListResultFromEndpoint(result);
+  }
+
+  async getActiveProfile() {
+    return this.getJson('/v1/profile/active');
+  }
+
   async createChatCompletion(body: unknown) {
     return this.requestJson('POST', '/v1/chat/completions', body);
   }
@@ -257,11 +272,7 @@ export class NativeHermesApiClient implements HermesApiClient {
   }
 
   async runTask(input: HermesApiRunTaskInput): Promise<HermesApiRunTaskResult> {
-    const start = await this.request('POST', `${this.baseUrl}/v1/runs`, {
-      input: input.input,
-      instructions: input.instructions,
-      session_id: input.sessionId,
-    });
+    const start = await this.request('POST', `${this.baseUrl}/v1/runs`, runStartBody(input));
     const startBody = parseJson(start.body);
     if (start.status < 200 || start.status >= 300) {
       return {
@@ -424,6 +435,16 @@ function healthResult(ok: boolean, message: string, profile?: HermesProfileMetad
   return profile ? { ok, message, profile } : { ok, message };
 }
 
+function runStartBody(input: HermesApiRunTaskInput) {
+  const body: Record<string, unknown> = { input: input.input };
+  if (input.instructions !== undefined) body.instructions = input.instructions;
+  if (input.sessionId !== undefined) body.session_id = input.sessionId;
+  if (input.profileRoutingSupported && input.profile?.name) {
+    body.profile = input.profile.name;
+  }
+  return body;
+}
+
 function profileFromBody(body: unknown): HermesProfileMetadata | undefined {
   if (!body || typeof body !== 'object') return undefined;
   const candidate = body as Record<string, unknown>;
@@ -449,6 +470,140 @@ function profileFromPair(idValue: unknown, nameValue: unknown): HermesProfileMet
   if (!name) return undefined;
   const id = typeof idValue === 'string' && idValue.trim() ? idValue.trim() : slugFromName(name);
   return { id, name };
+}
+
+function profileListResultFromEndpoint(result: HermesEndpointResult<unknown>): HermesProfileListResult {
+  if (!result.ok) {
+    return {
+      ok: false,
+      profiles: [],
+      source: 'unavailable',
+      message: result.error ?? `Gateway /v1/profiles returned HTTP ${result.status}.`,
+      executionRouting: 'unsupported',
+      executionRoutingReason: '/v1/profiles is unavailable or does not advertise selected-profile routing.',
+    };
+  }
+
+  const payload = result.data;
+  const rawProfiles = profilesArrayFromPayload(payload);
+  const activeProfile = activeProfileFromPayload(payload);
+  const activeId = activeProfileIdFromPayload(payload) ?? activeProfile?.id;
+  const routing = profileRoutingFromPayload(payload);
+  const profiles = rawProfiles
+    .map((item) => profileFromUnknown(item, 'profile'))
+    .filter((profile): profile is HermesProfileMetadata => Boolean(profile))
+    .map((profile) => {
+      const mapped: HermesProfileMetadata = {
+        ...profile,
+        source: 'public-rest',
+        active: activeId ? profile.id === activeId || profile.name === activeId : profile.active === true,
+        executionRouting: routing.supported ? 'supported' : 'unsupported',
+      };
+      if (!routing.supported) mapped.unavailableReason = routing.reason;
+      return mapped;
+    });
+
+  if (profiles.length === 0 && activeProfile) {
+    profiles.push({
+      ...activeProfile,
+      source: 'public-rest',
+      active: true,
+      executionRouting: routing.supported ? 'supported' : 'unsupported',
+    });
+    if (!routing.supported) profiles[0].unavailableReason = routing.reason;
+  }
+
+  if (profiles.length === 0) {
+    return {
+      ok: false,
+      profiles: [],
+      source: 'unavailable',
+      message: 'Gateway /v1/profiles returned no profile metadata.',
+      executionRouting: 'unsupported',
+      executionRoutingReason: routing.reason,
+    };
+  }
+
+  const resolvedActiveId = profiles.find((profile) => profile.active)?.id ?? activeId ?? profiles[0]?.id;
+  return {
+    ok: true,
+    profiles,
+    activeProfileId: resolvedActiveId,
+    activeProfileSource: resolvedActiveId ? 'public-rest' : undefined,
+    source: 'public-rest',
+    message: `${profiles.length} profiles discovered from public REST.`,
+    executionRouting: routing.supported ? 'supported' : 'unsupported',
+    executionRoutingReason: routing.supported ? undefined : routing.reason,
+  };
+}
+
+function profilesArrayFromPayload(payload: unknown) {
+  if (Array.isArray(payload)) return payload;
+  if (!payload || typeof payload !== 'object') return [];
+  const candidate = payload as Record<string, unknown>;
+  for (const key of ['profiles', 'items', 'data']) {
+    if (Array.isArray(candidate[key])) return candidate[key] as unknown[];
+  }
+  return [];
+}
+
+function activeProfileFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const candidate = payload as Record<string, unknown>;
+  return (
+    profileFromUnknown(candidate.active_profile, 'active-profile') ??
+    profileFromUnknown(candidate.profile, 'active-profile') ??
+    profileFromPair(candidate.active_profile_id, candidate.active_profile_name) ??
+    profileFromPair(candidate.profile_id, candidate.profile_name)
+  );
+}
+
+function activeProfileIdFromPayload(payload: unknown) {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const candidate = payload as Record<string, unknown>;
+  for (const key of ['active_profile_id', 'active_profile', 'active', 'profile_id']) {
+    const value = candidate[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return undefined;
+}
+
+function profileRoutingFromPayload(payload: unknown) {
+  const capabilityContainers = capabilityContainersFromPayload(payload);
+  for (const container of capabilityContainers) {
+    const profiles = objectField(container.profiles);
+    const routingValue =
+      profiles?.run_routing ??
+      profiles?.profile_routing ??
+      profiles?.selected_profile_routing ??
+      profiles?.request_context ??
+      container.profile_routing ??
+      container.run_profile_routing;
+    const requestContext = profiles?.request_context ?? container.profile_request_context;
+    const sessionContext = profiles?.session_context ?? container.profile_session_context;
+    if (routingValue === true && requestContext !== false && sessionContext !== false) {
+      return { supported: true, reason: undefined };
+    }
+  }
+  return {
+    supported: false,
+    reason: 'Gateway profile capability metadata does not advertise request/session run routing.',
+  };
+}
+
+function capabilityContainersFromPayload(payload: unknown): Array<Record<string, unknown>> {
+  if (!payload || typeof payload !== 'object') return [];
+  const candidate = payload as Record<string, unknown>;
+  const containers: Array<Record<string, unknown>> = [candidate];
+  for (const key of ['capabilities', 'features']) {
+    const nested = objectField(candidate[key]);
+    if (nested) containers.push(nested);
+  }
+  return containers;
+}
+
+function objectField(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
 }
 
 function slugFromName(name: string) {

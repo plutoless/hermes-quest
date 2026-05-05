@@ -111,17 +111,20 @@ Pet Mode should not show app-authored greeting, sending, accepted, report-ready,
 
 Bridge surfaces must be labeled with one of these source classes:
 
-- Gateway REST: Hermes API server, default `http://127.0.0.1:8642`.
-- Local Hermes state: Guild/Tauri bridge reads of the same local Hermes files/runtime state the official dashboard backend reads.
+- Public REST: official Hermes API server endpoints, default `http://127.0.0.1:8642`. `gateway-rest` remains accepted as the current internal label for this source.
+- CLI: stable official Hermes CLI commands for non-message capabilities when REST does not expose the signal.
+- Local Hermes state: bounded, read-only Guild/Tauri bridge reads of the same local Hermes files/runtime state the official dashboard backend reads.
+- Sidecar: Hermes Guild's local Python compatibility service, default `http://127.0.0.1:8765`; fourth in precedence and not used as the default message execution path.
 - Dashboard compatibility: optional Hermes dashboard backend calls, default `http://127.0.0.1:9119`; protected calls require an explicit `X-Hermes-Session-Token`.
-- CLI/PTY: official Hermes CLI or dashboard PTY only when Gateway REST and local state are unavailable.
 - Guild-owned: active pet selection, direct assignment, review approval/revision, task brief, desktop/Pet state, and report-card normalization.
-- Mock fallback: mock bridge data shown only in mock mode or auto fallback.
-- Unavailable: real mode has no verified source and must not invent data.
+- Unavailable: normal runtime has no verified source and must not invent data.
+- Mock: test-only data for unit tests, development fixtures, and explicit test harnesses. Mock is not part of production source precedence and must not be a silent runtime fallback.
 
-`SystemStatus` exposes `hermesApiBaseUrl`, optional `hermesDashboardBaseUrl`, `dashboardAvailable`, and `dataSources` so UI surfaces can distinguish gateway REST, local Hermes state, dashboard compatibility, Guild-owned state, mock fallback, and unavailable data.
+Source precedence is public REST > CLI > local state > sidecar > Guild-owned > unavailable.
 
-`SystemStatus.operationalData` exposes concise read-only summaries for real gateway/local/compatibility surfaces: sessions, logs, analytics, cron jobs, config/defaults/schema, redacted env status, and gateway jobs. Env summaries must count configured keys only and must not include secret values.
+`SystemStatus` exposes `hermesApiBaseUrl`, optional `hermesDashboardBaseUrl`, optional `hermesSidecarBaseUrl`, `dashboardAvailable`, `sidecarAvailable`, and `dataSources` so UI surfaces can distinguish public REST, CLI, local Hermes state, sidecar, dashboard compatibility, Guild-owned state, and unavailable data. Mock labels may exist for tests and explicit development harnesses only.
+
+`SystemStatus.operationalData` exposes concise read-only summaries for real gateway/local/compatibility surfaces: sessions, logs, analytics, cron jobs, config/defaults/schema, redacted env status, gateway jobs, and sidecar local-state probes. Env summaries must count configured keys only and must not include secret values.
 
 Current gateway REST client coverage includes:
 
@@ -129,6 +132,8 @@ Current gateway REST client coverage includes:
 - `GET /health/detailed`
 - `GET /v1/models`
 - `GET /v1/capabilities`
+- `GET /v1/profiles`
+- `GET /v1/profile/active`
 - `POST /v1/chat/completions`
 - `POST /v1/responses`
 - `GET /v1/responses/{id}`
@@ -175,9 +180,74 @@ Current dashboard compatibility client coverage includes:
 
 Write endpoints are client-supported but must be invoked only from explicit user actions. Env/API-key UI must display only redacted or metadata state, never cleartext secret values.
 
+### Public REST Profile Context Contract
+
+Hermes Guild supports selected-profile execution through public REST only when gateway metadata explicitly advertises it. Supported gateway metadata must expose profile discovery plus request/session run routing, for example:
+
+```json
+{
+  "profiles": {
+    "list": true,
+    "active": true,
+    "request_context": true,
+    "session_context": true,
+    "run_routing": true
+  }
+}
+```
+
+When supported, Hermes Guild may send `profile` in `POST /v1/runs` using the selected Hermes profile name. When unsupported, Hermes Guild must omit `profile`, `profile_id`, and `profile_name`, keep assignment as Guild-owned state, and show `profile routing unavailable`.
+
+The intended Hermes gateway behavior is request/session scoped:
+
+- explicit JSON `profile` or `X-Hermes-Profile`
+- session-bound profile by `session_id`
+- fallback to active/global Hermes profile
+- no `hermes profile use` and no global active-profile mutation for per-run routing
+
+Hermes Guild must not patch Hermes source to create this contract. If the installed gateway does not advertise profile routing, Guild continues through the non-source-edit route order: CLI, safe read-only local state evidence, then the Guild Python sidecar. If none can route execution, Guild keeps the route unavailable.
+
+### Profile Context
+
+New Pet messages and Quest Board tasks carry a `profileContext` snapshot:
+
+- `profileId` and `profileName` from real Hermes profile metadata.
+- `source` for profile identity.
+- `routingSource` and `routingMode` for the actual execution path.
+- `sessionId` for the Guild task/chat session.
+- `verified` and `unavailableReason` so assignment cannot be confused with execution routing.
+
+Switching the active profile affects new work only. Existing tasks, timelines, and report cards preserve the profile context captured at creation time.
+
 Protected dashboard compatibility endpoints are skipped unless an explicit session token is available. The official dashboard token is generated per dashboard process and is not persisted by Hermes Guild.
 
-## Mock v0 Runtime Behavior
+Current sidecar compatibility client coverage includes:
+
+- `GET /health`
+- `GET /capabilities`
+- `GET /local-state/summary`
+- `POST /runs`
+- `GET /runs/{id}`
+- `POST /runs/{id}/stop`
+
+Current Python sidecar HTTP coverage includes:
+
+- `GET /health`
+- `GET /version`
+- `GET /capabilities`
+- `GET /profiles`
+- `GET /active-profile`
+- `GET /local-state/summary`
+- `POST /runs`
+- `GET /runs/{id}`
+- `GET /runs/{id}/events`
+- `POST /runs/{id}/stop`
+
+When public REST lacks selected-profile routing, the sidecar may execute a selected profile through the verified CLI mechanism `hermes -p <profile> -z <prompt>`. The sidecar route is loopback-only, uses bounded subprocess arguments, does not call `hermes profile use`, and returns structured routing metadata. If CLI profile execution is unavailable, sidecar run endpoints return structured unsupported responses with the exact blocker.
+
+## Test Mock Behavior
+
+Mock behavior is retained for test coverage and explicit development harnesses. It is not a production fallback and should not be used to make unavailable Hermes state appear real.
 
 - The app singleton bridge persists the latest mock snapshot to `localStorage`.
 - The app singleton bridge broadcasts mock updates through `BroadcastChannel` so the Pet Mode webview and Guild Hall webview can observe the same local state.
@@ -190,9 +260,11 @@ Protected dashboard compatibility endpoints are skipped unless an explicit sessi
 ## Real Runtime Behavior
 
 - Real task execution uses Gateway REST runs and event streams.
+- Sidecar availability is checked separately from gateway availability.
 - Dashboard compatibility availability is checked separately from gateway availability.
-- Gateway availability decides whether auto mode uses real execution or mock fallback.
-- Dashboard compatibility unavailability or missing session-token access does not force task execution to mock fallback; affected surfaces are labeled unavailable.
+- Gateway unavailability is surfaced as unavailable/error in normal runtime; it must not silently substitute mock data.
+- Sidecar unavailability does not affect Gateway REST task execution; selected-profile fallback execution is labeled unavailable when sidecar is needed but unavailable.
+- Dashboard compatibility unavailability or missing session-token access does not affect task execution; affected surfaces are labeled unavailable.
 - Real mode never falls back to mock when gateway health fails.
 - Running gateway tasks can be stopped only through explicit user action and only after the run id is known.
 - Gateway run-status timeline entries are bridge-visible status evidence and should not be rendered as Pet chat bubbles.

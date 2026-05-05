@@ -17,7 +17,10 @@ import type {
   HermesApiRunEvent,
   HermesBridgeApi,
   HermesHealth,
+  HermesProfileListResult,
   HermesProfileMetadata,
+  HermesProfileRunClient,
+  HermesSidecarClient,
   Listener,
 } from './types';
 
@@ -98,7 +101,9 @@ const seedSnapshot = (config: BridgeConfig): BridgeSnapshot => ({
       hermesAvailable: 'unchecked',
       hermesApiBaseUrl: config.hermesApiBaseUrl,
       hermesDashboardBaseUrl: config.hermesDashboardBaseUrl,
+      hermesSidecarBaseUrl: config.hermesSidecarBaseUrl,
       dashboardAvailable: 'unchecked',
+      sidecarAvailable: 'unchecked',
       dataSources: {
         gateway: 'gateway-rest',
         gatewayJobs: 'unavailable',
@@ -116,8 +121,10 @@ const seedSnapshot = (config: BridgeConfig): BridgeSnapshot => ({
         config: 'unavailable',
         env: 'unavailable',
         cronJobs: 'unavailable',
+        sidecar: 'unavailable',
+        localStateSummary: 'unavailable',
       },
-      logsSummary: `Bridge mode: real. Hermes API base URL: ${config.hermesApiBaseUrl}. Dashboard compatibility base URL: ${config.hermesDashboardBaseUrl}.`,
+      logsSummary: `Bridge mode: real. Hermes API base URL: ${config.hermesApiBaseUrl}. Dashboard compatibility base URL: ${config.hermesDashboardBaseUrl}. Sidecar base URL: ${config.hermesSidecarBaseUrl}.`,
       warnings: ['Real bridge uses Hermes API /v1/runs. Profile mapping is not sent because the API does not expose a profile parameter.'],
     },
   petPosition: { x: 32, y: 32 },
@@ -130,6 +137,8 @@ export class RealHermesBridge implements HermesBridgeApi {
   constructor(
     private readonly config: BridgeConfig,
     private readonly apiClient: HermesApiClient,
+    private readonly sidecarClient?: HermesSidecarClient,
+    private readonly profileRunClient?: HermesProfileRunClient,
   ) {
     this.snapshot = seedSnapshot(config);
   }
@@ -150,35 +159,36 @@ export class RealHermesBridge implements HermesBridgeApi {
   }
 
   applyHermesProfile(profile: HermesProfileMetadata | undefined) {
-    const realProfile = profile ?? { id: 'profile-unavailable', name: 'Profile unavailable' };
+    const source = profile?.source ?? (profile ? 'public-rest' : 'unavailable');
+    const realProfile = profile ?? {
+      id: 'profile-unavailable',
+      name: 'Profile unavailable',
+      source: 'unavailable' as const,
+      unavailableReason: 'Hermes API /health did not provide active profile metadata.',
+    };
     const currentAgent = this.snapshot.agents.find((agent) => agent.id === this.snapshot.activeProfileId);
-    const activeAgent: Agent = {
-      id: realProfile.id,
-      name: realProfile.name,
-      role: 'Builder',
+    const activeAgent = this.agentFromProfile(realProfile, 0, true, {
       status: currentAgent?.status ?? 'idle',
       availability: currentAgent?.availability ?? 'available',
-      activeInPet: true,
       currentTaskId: currentAgent?.currentTaskId,
-      traits: ['Execution', 'Planning', 'Reliability'],
-      bestFor: 'real Hermes API execution',
-      avoid: 'unsupported profile routing claims',
-      health: profile ? 'Mapped from Hermes API metadata' : 'Hermes API profile metadata unavailable',
-      equipment: ['Hermes API server', 'Workspace tools'],
-      skills: [],
-    };
+    });
 
-    const previousActiveProfileId = this.snapshot.activeProfileId;
     this.snapshot.activeProfileId = activeAgent.id;
     this.snapshot.agents = [activeAgent];
-    this.snapshot.tasks = this.snapshot.tasks.map((task) =>
-      task.assigneeId === previousActiveProfileId ? { ...task, assigneeId: activeAgent.id } : task,
-    );
-    this.snapshot.reports = this.snapshot.reports.map((report) =>
-      report.agentId === previousActiveProfileId ? { ...report, agentId: activeAgent.id } : report,
-    );
     this.snapshot.systemStatus = {
       ...this.snapshot.systemStatus,
+      dataSources: {
+        ...this.snapshot.systemStatus.dataSources,
+        profiles: source,
+        activeProfile: source,
+        profileRouting: 'unavailable',
+      },
+      operationalData: {
+        ...this.snapshot.systemStatus.operationalData,
+        profileSummary: profile ? `1 profile from ${source}` : 'Profile metadata unavailable',
+        activeProfileSummary: `${activeAgent.name} from ${source}`,
+        profileRoutingSummary: this.profileRoutingSummary('unsupported'),
+      },
       logsSummary: `${this.snapshot.systemStatus.logsSummary} Active Hermes profile: ${activeAgent.name}.`,
       warnings: profile
         ? this.snapshot.systemStatus.warnings.filter((warning) => warning !== 'Hermes API /health did not provide active profile metadata.')
@@ -186,6 +196,58 @@ export class RealHermesBridge implements HermesBridgeApi {
             'Hermes API /health did not provide active profile metadata.',
             ...this.snapshot.systemStatus.warnings.filter((warning) => warning !== 'Hermes API /health did not provide active profile metadata.'),
           ],
+    };
+  }
+
+  applyHermesProfiles(result: HermesProfileListResult) {
+    const activeProfileId = result.activeProfileId && result.profiles.some((profile) => profile.id === result.activeProfileId)
+      ? result.activeProfileId
+      : result.profiles[0]?.id;
+    if (!activeProfileId) {
+      this.applyHermesProfile(undefined);
+      return;
+    }
+
+    const currentById = new Map(this.snapshot.agents.map((agent) => [agent.id, agent]));
+    this.snapshot.activeProfileId = activeProfileId;
+    const activeProfileSource = result.activeProfileSource ?? result.source;
+    this.snapshot.agents = result.profiles.map((profile, index) => {
+      const currentAgent = currentById.get(profile.id);
+      return this.agentFromProfile(
+        {
+          ...profile,
+          source: profile.source ?? result.source,
+          executionRouting: profile.executionRouting ?? result.executionRouting ?? 'unsupported',
+          unavailableReason: profile.unavailableReason ?? result.executionRoutingReason,
+        },
+        index,
+        profile.id === activeProfileId,
+        currentAgent,
+      );
+    });
+    this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
+      dataSources: {
+        ...this.snapshot.systemStatus.dataSources,
+        profiles: result.source,
+        activeProfile: activeProfileSource,
+        profileRouting: result.executionRouting === 'supported' ? result.executionRoutingSource ?? result.source : 'unavailable',
+      },
+      operationalData: {
+        ...this.snapshot.systemStatus.operationalData,
+        profileSummary: `${result.profiles.length} profiles from ${result.source}`,
+        activeProfileSummary: `${this.agentName(activeProfileId)} from ${activeProfileSource}`,
+        profileRoutingSummary: this.profileRoutingSummary(
+          result.executionRouting ?? 'unsupported',
+          result.executionRoutingReason,
+          result.executionRoutingSource ?? result.source,
+          result.executionRoutingMode,
+        ),
+      },
+      warnings: [
+        ...(result.executionRouting === 'supported' ? [] : [this.profileRoutingWarning(result.executionRoutingReason)]),
+        ...this.snapshot.systemStatus.warnings.filter((warning) => !warning.startsWith('Profile routing ')),
+      ],
     };
   }
 
@@ -294,6 +356,22 @@ export class RealHermesBridge implements HermesBridgeApi {
     };
   }
 
+  applySidecarCompatibility(input: { capabilities?: unknown; localStateSummary?: unknown }) {
+    const sidecarSummary = sidecarSummaryFromPayload(input.localStateSummary, input.capabilities);
+    this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
+      operationalData: {
+        ...this.snapshot.systemStatus.operationalData,
+        sidecarSummary,
+      },
+      dataSources: {
+        ...this.snapshot.systemStatus.dataSources,
+        sidecar: input.capabilities || input.localStateSummary ? 'sidecar' : this.snapshot.systemStatus.dataSources?.sidecar ?? 'unavailable',
+        localStateSummary: input.localStateSummary ? 'sidecar' : this.snapshot.systemStatus.dataSources?.localStateSummary ?? 'unavailable',
+      },
+    };
+  }
+
   markDashboardCompatibilityProtected() {
     this.snapshot.systemStatus = {
       ...this.snapshot.systemStatus,
@@ -329,7 +407,7 @@ export class RealHermesBridge implements HermesBridgeApi {
       activeImplementation: 'real',
       hermesAvailable: 'unavailable',
       fallbackReason: undefined,
-      logsSummary: `Bridge mode: real. Active implementation: real. Hermes unavailable: ${message}`,
+      logsSummary: `Bridge mode: ${this.snapshot.systemStatus.bridgeMode}. Active implementation: real. Hermes unavailable: ${message}`,
       warnings: [`Real mode did not fall back to mock: ${message}`],
     };
   }
@@ -434,7 +512,8 @@ export class RealHermesBridge implements HermesBridgeApi {
       };
       return false;
     }
-    if (!this.apiClient.stopRun) {
+    const stopClient = task.profileContext?.routingSource === 'sidecar' && this.sidecarClient?.stopRun ? this.sidecarClient : this.apiClient;
+    if (!stopClient.stopRun) {
       this.snapshot.systemStatus = {
         ...this.snapshot.systemStatus,
         warnings: [
@@ -444,7 +523,7 @@ export class RealHermesBridge implements HermesBridgeApi {
       };
       return false;
     }
-    const result = await this.apiClient.stopRun(task.hermesRunId);
+    const result = await stopClient.stopRun(task.hermesRunId);
     if (!result.ok) {
       this.snapshot.systemStatus = {
         ...this.snapshot.systemStatus,
@@ -514,6 +593,8 @@ export class RealHermesBridge implements HermesBridgeApi {
 
     const createdAt = now();
     const taskId = id('quest');
+    const profileContext = this.profileContextForTask(input.assigneeId, taskId);
+    const routingEvent = this.profileRoutingEvent(taskId, input.assigneeId, profileContext);
     const task: Task = {
       id: taskId,
       title: this.titleFromBrief(input.brief),
@@ -529,9 +610,11 @@ export class RealHermesBridge implements HermesBridgeApi {
       artifacts: [],
       timeline: [
         this.timeline(taskId, input.assigneeId, 'created', `Quest created from ${input.type === 'pet' ? 'Pet Mode' : 'Quest Board'}.`, 'guild'),
-        this.timeline(taskId, input.assigneeId, 'assigned', `Assigned to ${this.agentName(input.assigneeId)} through the Hermes API bridge.`, 'guild'),
+        this.timeline(taskId, input.assigneeId, 'assigned', `Assigned to selected Hermes profile ${this.agentName(input.assigneeId)}.`, 'guild'),
+        ...(routingEvent ? [routingEvent] : []),
       ],
       reviewStatus: 'none',
+      profileContext,
       createdAt,
       updatedAt: createdAt,
     };
@@ -551,10 +634,22 @@ export class RealHermesBridge implements HermesBridgeApi {
     this.setAgentBusy(task.assigneeId, task.id, 'running');
     this.emit(makeEvent('task_progress', task.assigneeId, task.id, { progress: 25 }));
 
-    const result = await this.apiClient.runTask({
+    const profile = this.profileForTask(task.assigneeId);
+    const profileContext: NonNullable<Task['profileContext']> = task.profileContext ?? this.profileContextForTask(task.assigneeId, task.id);
+    const runClient =
+      profileContext.routingSource === 'sidecar' && this.sidecarClient?.runTask ? this.sidecarClient :
+        profileContext.routingSource === 'cli' && this.profileRunClient?.runTask ? this.profileRunClient :
+          this.apiClient;
+    if (!runClient.runTask) {
+      this.failTask(task, `Profile route ${profileContext.routingSource} does not expose task execution.`);
+      return;
+    }
+    const result = await runClient.runTask({
       input: this.promptForTask(task),
       instructions: 'Return a concise final answer suitable for a Quest Report Card.',
       sessionId: task.id,
+      profile,
+      profileRoutingSupported: profileContext.routingSource === 'public-rest' || profileContext.routingSource === 'gateway-rest',
       onRunStarted: (runId) => {
         this.updateTask(task.id, { hermesRunId: runId });
       },
@@ -567,14 +662,23 @@ export class RealHermesBridge implements HermesBridgeApi {
       return;
     }
 
+    if (result.runId) {
+      this.updateTask(task.id, { hermesRunId: result.runId });
+    }
     this.recordRunEvents(task.id, result.events);
     await this.recordRunStatus(task.id, result.runId ?? this.findTask(task.id).hermesRunId);
+    if (result.profileContext) {
+      this.updateTask(task.id, { profileContext: result.profileContext });
+    }
     this.completeTask(this.findTask(task.id), result.output.trim() || '(Hermes API returned no output.)');
   }
 
   private async recordRunStatus(taskId: string, runId: string | undefined) {
-    if (!runId || !this.apiClient.getRun) return;
-    const result = await this.apiClient.getRun(runId);
+    if (!runId) return;
+    const task = this.findTask(taskId);
+    const statusClient = task.profileContext?.routingSource === 'sidecar' && this.sidecarClient?.getRun ? this.sidecarClient : this.apiClient;
+    if (!statusClient.getRun) return;
+    const result = await statusClient.getRun(runId);
     if (!result.ok) {
       this.snapshot.systemStatus = {
         ...this.snapshot.systemStatus,
@@ -587,15 +691,17 @@ export class RealHermesBridge implements HermesBridgeApi {
     }
     const status = runStatusFromPayload(result.data);
     if (!status) return;
-    const task = this.findTask(taskId);
+    const updatedTask = this.findTask(taskId);
+    const statusSource = updatedTask.profileContext?.routingSource === 'sidecar' ? 'sidecar' : 'gateway-rest';
+    const statusLabel = statusSource === 'sidecar' ? 'Sidecar run' : 'Gateway run';
     this.updateTask(taskId, {
-      timeline: [...task.timeline, this.timeline(taskId, task.assigneeId, 'progress', `Gateway run status: ${status}.`, 'bridge')],
+      timeline: [...updatedTask.timeline, this.timeline(taskId, updatedTask.assigneeId, 'progress', `${statusLabel} status: ${status}.`, 'bridge')],
     });
     this.snapshot.systemStatus = {
       ...this.snapshot.systemStatus,
       dataSources: {
         ...this.snapshot.systemStatus.dataSources,
-        runStatus: 'gateway-rest',
+        runStatus: statusSource,
       },
     };
   }
@@ -704,6 +810,13 @@ export class RealHermesBridge implements HermesBridgeApi {
   }
 
   private reportForTask(task: Task, artifacts: Artifact[], finalOutput: string): ReportCard {
+    const agent = this.snapshot.agents.find((item) => item.id === task.assigneeId);
+    const profileGap = task.profileContext?.verified === false || agent?.executionRouting === 'unsupported'
+      ? `Selected profile ${agent?.name ?? task.profileContext?.profileName ?? task.assigneeId} was assigned in Guild, but Hermes execution routing is unavailable: ${task.profileContext?.unavailableReason ?? agent?.unavailableReason ?? this.profileRoutingReason()}.`
+      : undefined;
+    const profileFact = task.profileContext?.verified
+      ? `Guild routed this quest to profile ${task.profileContext.profileName} through ${task.profileContext.routingSource} (${task.profileContext.routingMode}).`
+      : `Guild assigned this quest to profile ${this.agentName(task.assigneeId)}.`;
     return {
       id: id('report'),
       taskId: task.id,
@@ -714,9 +827,10 @@ export class RealHermesBridge implements HermesBridgeApi {
       facts: [
         'Hermes API returned final output for this Guild quest.',
         'Guild captured the API run result and converted it into this Quest Report Card.',
+        profileFact,
       ],
       assumptions: ['Hermes API run.completed output is treated as final output for this bridge.'],
-      knownGaps: ['Guild role-to-Hermes profile mapping is not sent because /v1/runs does not expose a profile field.'],
+      knownGaps: profileGap ? [profileGap] : [],
       recommendedNextAction: 'Approve the report or request a focused revision with concrete instructions.',
       reviewItems: ['Check that Hermes output satisfies the brief.', 'Request revision if the output needs another Hermes pass.'],
       createdAt: now(),
@@ -778,8 +892,131 @@ export class RealHermesBridge implements HermesBridgeApi {
     return this.snapshot.agents.find((agent) => agent.id === agentId)?.name ?? 'Unknown agent';
   }
 
+  private profileForTask(agentId: string): HermesProfileMetadata | undefined {
+    const agent = this.snapshot.agents.find((item) => item.id === agentId);
+    if (!agent || agent.executionRouting !== 'supported') return undefined;
+    return {
+      id: agent.id,
+      name: agent.name,
+      source: agent.source,
+      role: agent.role,
+      executionRouting: agent.executionRouting,
+    };
+  }
+
+  private profileContextForTask(agentId: string, sessionId: string): NonNullable<Task['profileContext']> {
+    const agent = this.snapshot.agents.find((item) => item.id === agentId);
+    const routingSource = this.snapshot.systemStatus.dataSources?.profileRouting ?? 'unavailable';
+    if (!agent) {
+      return {
+        profileId: agentId,
+        profileName: 'Unknown profile',
+        routingSource: 'unavailable',
+        routingMode: 'unavailable',
+        sessionId,
+        verified: false,
+        unavailableReason: `Unknown assignee ${agentId}`,
+      };
+    }
+    const supported = agent.executionRouting === 'supported' && routingSource !== 'unavailable';
+    return {
+      profileId: agent.id,
+      profileName: agent.name,
+      source: agent.source,
+      routingSource: supported ? routingSource : 'unavailable',
+      routingMode: supported ? this.routingModeForSource(routingSource) : 'unavailable',
+      sessionId,
+      verified: supported,
+      unavailableReason: supported ? undefined : agent.unavailableReason ?? this.profileRoutingReason(),
+    };
+  }
+
+  private routingModeForSource(source: NonNullable<Task['profileContext']>['routingSource']): NonNullable<Task['profileContext']>['routingMode'] {
+    if (source === 'public-rest' || source === 'gateway-rest') return 'request';
+    if (source === 'sidecar') return 'sidecar';
+    if (source === 'cli' || source === 'cli-pty') return 'cli';
+    return 'unavailable';
+  }
+
   private hasAgent(agentId: string) {
     return this.snapshot.agents.some((agent) => agent.id === agentId);
+  }
+
+  private agentFromProfile(
+    profile: HermesProfileMetadata,
+    index: number,
+    activeInPet: boolean,
+    current?: Partial<Agent>,
+  ): Agent {
+    const role = profile.role ?? roleForIndex(index);
+    const routing = profile.executionRouting ?? 'unsupported';
+    const unavailableReason = profile.unavailableReason ?? (routing === 'unsupported' ? this.profileRoutingReason() : undefined);
+    return {
+      id: profile.id,
+      name: profile.name,
+      role,
+      source: profile.source,
+      executionRouting: routing,
+      unavailableReason,
+      status: current?.status ?? 'idle',
+      availability: current?.availability ?? 'available',
+      activeInPet,
+      currentTaskId: current?.currentTaskId,
+      traits: traitsForRole(role),
+      bestFor: role === 'Researcher' ? 'research, synthesis, source-heavy briefs' : role === 'Reviewer' ? 'risk checks, review, revision prompts' : 'real Hermes API execution',
+      avoid: routing === 'unsupported' ? 'claims that Gateway REST routed execution to this profile' : 'unsupported profile claims',
+      health: profile.source === 'unavailable'
+        ? profile.unavailableReason ?? 'Hermes profile metadata unavailable'
+        : `Mapped from verified Hermes ${profile.source} profile metadata`,
+      equipment: [
+        'Hermes API server',
+        'Workspace tools',
+        profile.model ? `Model: ${profile.model}` : undefined,
+        profile.alias ? `Alias: ${profile.alias}` : undefined,
+        profile.gatewayStatus ? `Gateway: ${profile.gatewayStatus}` : undefined,
+      ].filter((item): item is string => Boolean(item)),
+      skills: current?.skills ?? [],
+      lastReportId: current?.lastReportId,
+    };
+  }
+
+  private profileRoutingEvent(taskId: string, agentId: string, profileContext?: Task['profileContext']) {
+    const agent = this.snapshot.agents.find((item) => item.id === agentId);
+    if (profileContext?.verified) {
+      return this.timeline(
+        taskId,
+        agentId,
+        'progress',
+        `Profile context verified: ${profileContext.profileName} routed through ${profileContext.routingSource} (${profileContext.routingMode}).`,
+        'bridge',
+      );
+    }
+    if (agent?.executionRouting !== 'unsupported') return undefined;
+    return this.timeline(
+      taskId,
+      agentId,
+      'progress',
+      `Profile routing unavailable: ${profileContext?.unavailableReason ?? agent.unavailableReason ?? this.profileRoutingReason()}`,
+      'bridge',
+    );
+  }
+
+  private profileRoutingSummary(
+    status: Agent['executionRouting'] = 'unsupported',
+    reason?: string,
+    source?: string,
+    mode?: string,
+  ) {
+    if (status === 'supported') return `Profile routing supported by ${source ?? 'public REST'}${mode ? ` (${mode})` : ''}.`;
+    return `Profile routing unavailable: ${reason ?? this.profileRoutingReason()}`;
+  }
+
+  private profileRoutingWarning(reason?: string) {
+    return this.profileRoutingSummary('unsupported', reason);
+  }
+
+  private profileRoutingReason() {
+    return '/v1/runs does not expose a verified selected-profile parameter.';
   }
 
   private titleFromBrief(brief: string) {
@@ -810,6 +1047,17 @@ function skillsFromDashboard(payload: unknown): Skill[] {
       };
     })
     .filter((skill): skill is Skill => Boolean(skill));
+}
+
+function roleForIndex(index: number): Agent['role'] {
+  const roles: Agent['role'][] = ['Builder', 'Researcher', 'Reviewer'];
+  return roles[index % roles.length];
+}
+
+function traitsForRole(role: Agent['role']) {
+  if (role === 'Researcher') return ['Research', 'Context Discipline', 'Judgement'];
+  if (role === 'Reviewer') return ['Judgement', 'Communication', 'Reliability'];
+  return ['Execution', 'Planning', 'Reliability'];
 }
 
 function toolsetsFromDashboard(payload: unknown): string[] {
@@ -909,6 +1157,32 @@ function envSummary(payload: unknown) {
     return Boolean(metadata.redacted || metadata.value);
   }).length;
   return `${configured} env key${configured === 1 ? '' : 's'} configured`;
+}
+
+function sidecarSummaryFromPayload(localStateSummary: unknown, capabilities: unknown) {
+  const hasCapabilities = Boolean(capabilities);
+  if (!localStateSummary || typeof localStateSummary !== 'object') {
+    return hasCapabilities ? 'sidecar capabilities available; local state unavailable' : 'sidecar compatibility unavailable';
+  }
+  const candidate = localStateSummary as Record<string, unknown>;
+  const source = (stringField(candidate.source) || 'local-state').replace(/-/g, ' ');
+  const profiles = objectField(candidate.profiles);
+  const logs = objectField(candidate.logs);
+  const env = objectField(candidate.env);
+  const profileCount = numberField(profiles?.count);
+  const logCount = numberField(logs?.count);
+  const envKeys = Array.isArray(env?.configured_keys) ? env.configured_keys.length : undefined;
+  const parts = [
+    `${source} summary available`,
+    profileCount !== undefined ? `${profileCount} profiles` : undefined,
+    logCount !== undefined ? `${logCount} log files` : undefined,
+    envKeys !== undefined ? `${envKeys} env keys configured` : undefined,
+  ].filter(Boolean);
+  return parts.join('; ');
+}
+
+function objectField(value: unknown) {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : undefined;
 }
 
 function numberField(value: unknown) {

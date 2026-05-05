@@ -41,7 +41,8 @@ The v0 implementation should prioritize:
 ```text
 one active pet
 direct assignment
-mock Hermes Bridge first
+real Hermes bridge for normal runtime
+mock bridge only for tests and explicit development harnesses
 Quest Board
 Task Timeline
 Review / Quest Report Card

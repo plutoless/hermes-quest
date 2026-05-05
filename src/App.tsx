@@ -225,10 +225,18 @@ function getExecutionSource(status: SystemStatus) {
 
 function getProfileSource(status: SystemStatus, agent?: Agent) {
   if (status.activeImplementation === 'real') {
-    return agent?.name === 'Profile unavailable' ? 'Profile metadata unavailable' : 'Gateway REST metadata';
+    const source = agent?.source ?? status.dataSources?.activeProfile ?? status.dataSources?.profiles ?? 'unavailable';
+    if (source === 'unavailable' || agent?.name === 'Profile unavailable') return 'Profile unavailable';
+    return `${source} profile metadata`;
   }
   if (status.activeImplementation === 'loading') return 'Bridge loading';
   return status.bridgeMode === 'auto' ? 'Mock fallback roles' : 'Mock role presets';
+}
+
+function getProfileRoutingLabel(status: SystemStatus, agent?: Agent) {
+  if (status.activeImplementation !== 'real') return getExecutionSource(status);
+  if (agent?.executionRouting === 'supported') return 'Selected profile routing verified';
+  return status.operationalData?.profileRoutingSummary ?? 'Profile routing unavailable';
 }
 
 export function getOperationalStatusRows(status: SystemStatus) {
@@ -241,9 +249,13 @@ export function getOperationalStatusRows(status: SystemStatus) {
     { label: 'Config', value: status.operationalData?.configSummary, source: status.dataSources?.config },
     { label: 'Env', value: status.operationalData?.envSummary, source: status.dataSources?.env },
     { label: 'Gateway jobs', value: status.operationalData?.gatewayJobsSummary, source: status.dataSources?.gatewayJobs },
+    { label: 'Profiles', value: status.operationalData?.profileSummary, source: status.dataSources?.profiles },
+    { label: 'Active profile', value: status.operationalData?.activeProfileSummary, source: status.dataSources?.activeProfile },
+    { label: 'Profile routing', value: status.operationalData?.profileRoutingSummary, source: status.dataSources?.profileRouting },
+    { label: 'Sidecar', value: status.operationalData?.sidecarSummary, source: status.dataSources?.localStateSummary },
   ];
   return rows
-    .filter((row) => Boolean(row.value && row.source && row.source !== 'unavailable'))
+    .filter((row) => Boolean(row.value && row.source && (row.source !== 'unavailable' || row.label === 'Profile routing')))
     .map((row) => ({ label: row.label, value: row.value ?? '', source: row.source ?? 'unavailable' }));
 }
 
@@ -279,6 +291,11 @@ function App() {
   useEffect(() => {
     setDraftBridgeConfig(bridgeConfig);
   }, [bridgeConfig]);
+
+  useEffect(() => {
+    if (snapshot.agents.some((agent) => agent.id === boardAssignee)) return;
+    setBoardAssignee(snapshot.activeProfileId);
+  }, [boardAssignee, snapshot.activeProfileId, snapshot.agents]);
 
   useEffect(() => {
     persistVariant(selectedVariantId);
@@ -581,11 +598,20 @@ function BridgeStatusDetails({ status, config, bridgeReady, onConfigChange, onAp
             ariaLabel="Hermes dashboard compatibility base URL"
           />
         </label>
+        <label>
+          Sidecar compatibility
+          <PixelInput
+            value={config.hermesSidecarBaseUrl}
+            onChange={(hermesSidecarBaseUrl) => onConfigChange({ ...config, hermesSidecarBaseUrl })}
+            ariaLabel="Hermes sidecar compatibility base URL"
+          />
+        </label>
         <PixelButton type="button" tone="ghost" onClick={onApply} disabled={!bridgeReady}>
           Save
         </PixelButton>
         <PixelBadge status={status.activeImplementation}>Hermes {status.hermesAvailable}</PixelBadge>
         <PixelBadge status={status.dashboardAvailable === 'available' ? 'real' : 'mock'}>Dashboard {status.dashboardAvailable ?? 'unchecked'}</PixelBadge>
+        <PixelBadge status={status.sidecarAvailable === 'available' ? 'real' : 'mock'}>Sidecar {status.sidecarAvailable ?? 'unchecked'}</PixelBadge>
         {operationalRows.length > 0 && (
           <div className="pixel-operational-status" aria-label="Hermes operational data">
             {operationalRows.map((row) => (
@@ -1041,7 +1067,7 @@ function GuildHall({
           {
             id: 'guild-ready',
             title: `${activeAgent.name} ready`,
-            detail: `New quests route to ${activeAgent.role} unless reassigned.`,
+            detail: `New quests assign to ${activeAgent.name} unless reassigned.`,
             time: 'Now',
             status: activeAgent.status,
           },
@@ -1072,6 +1098,7 @@ function GuildHall({
   const updateBridgeMode = (bridgeMode: BridgeMode) => onBridgeConfigChange({ ...bridgeConfig, bridgeMode });
   const updateGatewayBaseUrl = (hermesApiBaseUrl: string) => onBridgeConfigChange({ ...bridgeConfig, hermesApiBaseUrl });
   const updateDashboardBaseUrl = (hermesDashboardBaseUrl: string) => onBridgeConfigChange({ ...bridgeConfig, hermesDashboardBaseUrl });
+  const updateSidecarBaseUrl = (hermesSidecarBaseUrl: string) => onBridgeConfigChange({ ...bridgeConfig, hermesSidecarBaseUrl });
 
   return (
     <PixelAppWindow
@@ -1100,12 +1127,19 @@ function GuildHall({
               Dashboard compatibility
               <PixelInput value={bridgeConfig.hermesDashboardBaseUrl} onChange={updateDashboardBaseUrl} ariaLabel="Hermes dashboard compatibility base URL" />
             </label>
+            <label>
+              Sidecar compatibility
+              <PixelInput value={bridgeConfig.hermesSidecarBaseUrl} onChange={updateSidecarBaseUrl} ariaLabel="Hermes sidecar compatibility base URL" />
+            </label>
             <PixelButton type="button" tone="ghost" onClick={onApplyBridgeConfig} disabled={!bridgeReady}>
               Save
             </PixelButton>
             <PixelBadge status={systemStatus.activeImplementation}>{bridgeHealthLabel}</PixelBadge>
             <PixelBadge status={systemStatus.dashboardAvailable === 'available' ? 'real' : 'mock'}>
               Dashboard {systemStatus.dashboardAvailable ?? 'unchecked'}
+            </PixelBadge>
+            <PixelBadge status={systemStatus.sidecarAvailable === 'available' ? 'real' : 'mock'}>
+              Sidecar {systemStatus.sidecarAvailable ?? 'unchecked'}
             </PixelBadge>
             {operationalRows.length > 0 && (
               <div className="pixel-operational-status" aria-label="Hermes operational data">
@@ -1184,7 +1218,7 @@ function GuildHall({
             </div>
           </div>
           <p className="pixel-companion-line">
-            {statusLabel[activeAgent.status]} beside the command desk. New quests route to this companion unless reassigned.
+            {statusLabel[activeAgent.status]} beside the command desk. New quests assign to this profile unless reassigned.
           </p>
           <div className="pixel-inset-note">
             <strong>Focus</strong>
@@ -1195,7 +1229,9 @@ function GuildHall({
             <p>{activeTaskRelation}</p>
           </div>
           <div className="pixel-companion-footer">
-            <PixelBadge status="mock">Guild Role · Hermes default runner</PixelBadge>
+            <PixelBadge status={activeAgent.executionRouting === 'supported' ? 'real' : 'mock'}>
+              {getProfileRoutingLabel(systemStatus, activeAgent)}
+            </PixelBadge>
             <label className="pixel-field-label pixel-profile-switcher">
               Switch
               <PixelSelect value={activeAgent.id} onChange={onSelectAgent} ariaLabel="Active companion">
@@ -1315,7 +1351,9 @@ function AgentCard({ agent, active, currentTask, onSelect }: { agent: Agent; act
         <dt>Equipment</dt>
         <dd>{agent.equipment.join(', ')}</dd>
       </dl>
-      <div className="truth-label">Guild Role · Real execution uses Hermes default runner</div>
+      <div className="truth-label">
+        Profile source: {agent.source ?? 'unavailable'} · Routing: {agent.executionRouting ?? 'unknown'}
+      </div>
     </article>
   );
 }
@@ -1373,7 +1411,7 @@ function QuestBoard({
             <PixelIcon name="seal" size={28} />
             <span>
               <strong>Quest Contract</strong>
-              <em>Brief the work, assign a Guild role, then post it to the active bridge.</em>
+              <em>Brief the work, select a Hermes profile, then post it to the active bridge.</em>
             </span>
           </div>
           <PixelInput
@@ -1423,7 +1461,7 @@ function QuestBoard({
           <div className="quest-board-empty">
             <PixelIcon name="quest" size={42} />
             <h3>No quests posted</h3>
-            <p>Draft a quest on the left and assign it to a Guild role.</p>
+            <p>Draft a quest on the left and assign it to a Hermes profile.</p>
             <span>Quest cards will show state, progress, and review readiness here.</span>
           </div>
         ) : (
@@ -1503,6 +1541,7 @@ function TaskDetail({
         <span>Review: {task.reviewStatus.replaceAll('_', ' ')}</span>
         <span>Execution: {getExecutionSource(systemStatus)}</span>
         <span>Profile data: {getProfileSource(systemStatus, agent)}</span>
+        <span>Profile routing: {getProfileRoutingLabel(systemStatus, agent)}</span>
         <span>Run id: {task.hermesRunId ?? 'unavailable'}</span>
       </div>
       {task.state === 'running' && (

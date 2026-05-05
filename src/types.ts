@@ -17,6 +17,9 @@ export interface Agent {
   id: string;
   name: string;
   role: 'Researcher' | 'Builder' | 'Reviewer';
+  source?: SystemDataSource;
+  executionRouting?: 'supported' | 'unsupported' | 'unknown';
+  unavailableReason?: string;
   status: AgentStatus;
   availability: AgentAvailability;
   activeInPet: boolean;
@@ -60,6 +63,17 @@ export interface TimelineEvent {
   source: TimelineSource;
 }
 
+export interface ProfileContext {
+  profileId: string;
+  profileName: string;
+  source?: SystemDataSource;
+  routingSource: SystemDataSource;
+  routingMode: 'request' | 'session' | 'cli' | 'sidecar' | 'unavailable';
+  sessionId?: string;
+  verified: boolean;
+  unavailableReason?: string;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -78,6 +92,7 @@ export interface Task {
   error?: string;
   revisionOfTaskId?: string;
   hermesRunId?: string;
+  profileContext?: ProfileContext;
   createdAt: string;
   updatedAt: string;
 }
@@ -101,17 +116,19 @@ export interface SystemStatus {
   gatewayStatus: 'mocked' | 'connected' | 'error';
   providerHealth: 'mocked' | 'healthy' | 'degraded';
   dashboardAvailable?: 'available' | 'unavailable' | 'unchecked';
+  sidecarAvailable?: 'available' | 'unavailable' | 'unchecked';
   bridgeMode: 'mock' | 'real' | 'auto';
   activeImplementation: 'mock' | 'real' | 'loading';
   hermesAvailable: 'available' | 'unavailable' | 'unchecked';
   fallbackReason?: string;
   hermesApiBaseUrl?: string;
   hermesDashboardBaseUrl?: string;
+  hermesSidecarBaseUrl?: string;
   logsSummary: string;
   warnings: string[];
   dataSources?: Record<
     string,
-    'gateway-rest' | 'local-hermes-state' | 'dashboard-compatibility' | 'guild-owned' | 'mock-fallback' | 'unavailable' | 'cli-pty'
+    SystemDataSource
   >;
   operationalData?: {
     sessionsSummary?: string;
@@ -122,8 +139,25 @@ export interface SystemStatus {
     configSummary?: string;
     envSummary?: string;
     gatewayJobsSummary?: string;
+    sidecarSummary?: string;
+    profileSummary?: string;
+    activeProfileSummary?: string;
+    profileRoutingSummary?: string;
   };
 }
+
+export type SystemDataSource =
+  | 'public-rest'
+  | 'gateway-rest'
+  | 'cli'
+  | 'local-state'
+  | 'local-hermes-state'
+  | 'sidecar'
+  | 'dashboard-compatibility'
+  | 'guild-owned'
+  | 'mock-fallback'
+  | 'unavailable'
+  | 'cli-pty';
 
 export interface PetPosition {
   x: number;

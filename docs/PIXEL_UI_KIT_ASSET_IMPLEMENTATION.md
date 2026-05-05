@@ -292,9 +292,9 @@ Guild Hall should use:
 Do not break:
 
 - RealHermes bridge
-- mock mode
 - real mode
 - auto mode
+- explicit test/dev mock harnesses
 - task submit
 - review approve / revise
 - integration truth visibility

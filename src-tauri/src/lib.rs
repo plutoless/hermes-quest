@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
-use std::{thread, time::Duration};
+use std::{process::Command, thread, time::Duration};
 #[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
@@ -9,6 +9,13 @@ use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 struct HermesApiResponse {
     status: u16,
     body: String,
+}
+
+#[derive(Debug, Serialize)]
+struct HermesCliResponse {
+    status: i32,
+    stdout: String,
+    stderr: String,
 }
 
 #[tauri::command]
@@ -47,6 +54,58 @@ async fn hermes_api_request(
         .map_err(|error| format!("Hermes API response read failed: {error}"))?;
 
     Ok(HermesApiResponse { status, body })
+}
+
+#[tauri::command]
+async fn hermes_profile_list() -> Result<HermesCliResponse, String> {
+    let output = Command::new("hermes")
+        .args(["profile", "list"])
+        .output()
+        .map_err(|error| format!("Failed to run hermes profile list: {error}"))?;
+
+    Ok(HermesCliResponse {
+        status: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+#[tauri::command]
+async fn hermes_profile_route_status() -> Result<HermesCliResponse, String> {
+    let output = Command::new("hermes")
+        .args(["-p", "default", "--help"])
+        .output()
+        .map_err(|error| format!("Failed to run hermes profile route probe: {error}"))?;
+
+    Ok(HermesCliResponse {
+        status: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
+}
+
+#[tauri::command]
+async fn hermes_profile_run(
+    profile: String,
+    input: String,
+    instructions: Option<String>,
+) -> Result<HermesCliResponse, String> {
+    let prompt = match instructions {
+        Some(instructions) if !instructions.trim().is_empty() => {
+            format!("{}\n\n{}", instructions.trim(), input)
+        }
+        _ => input,
+    };
+    let output = Command::new("hermes")
+        .args(["-p", profile.trim(), "-z", prompt.as_str()])
+        .output()
+        .map_err(|error| format!("Failed to run hermes selected profile task: {error}"))?;
+
+    Ok(HermesCliResponse {
+        status: output.status.code().unwrap_or(-1),
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+    })
 }
 
 fn with_optional_json(
@@ -157,6 +216,9 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             hermes_api_request,
+            hermes_profile_list,
+            hermes_profile_route_status,
+            hermes_profile_run,
             show_hall_window,
             show_pet_window
         ])

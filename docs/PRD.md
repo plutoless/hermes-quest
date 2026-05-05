@@ -21,8 +21,9 @@ Priority:
 - Active profile switcher.
 - Text task input from pet.
 - Pet opens Guild Hall.
-- 3 mock Hermes profiles: Researcher, Builder, Reviewer.
-- Mock Hermes Bridge first.
+- 3 configurable Hermes profile cards: Researcher, Builder, Reviewer.
+- Real Hermes bridge path first for normal runtime.
+- Mock bridge only for tests, fixtures, and explicit development harnesses.
 - Direct assignment only.
 - Quest Board.
 - Task Detail with timeline.
@@ -40,7 +41,7 @@ Priority:
 - Skill Deck.
 - Infirmary.
 - Voice input.
-- Full Hermes integration.
+- Multi-agent full Hermes integration beyond the v0 task/review loop.
 
 ## Acceptance Criteria
 
@@ -53,9 +54,9 @@ Priority:
 - Guild Hall shows the task.
 - Quest Board shows task list and detail.
 - Task detail shows timeline progress.
-- Mock execution completes.
+- Hermes execution completes in real runtime; mock execution may be used only in test/dev harnesses.
 - Quest Report Card appears in Review.
 - User can approve.
 - User can revise and rerun.
 - Error state is visible.
-- README explains how to run and what is mocked.
+- README explains how to run, what is real, and which mocks are test/dev-only.

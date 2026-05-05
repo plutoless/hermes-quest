@@ -16,10 +16,156 @@ Use:
 ## Current Status
 - React v0 loop is implemented and runnable through Vite.
 - Tauri native shell launches on macOS with separate Guild Hall and Pet windows.
-- MockHermesBridge remains available.
+- MockHermesBridge remains available for tests and explicit development harnesses only.
 - RealHermesBridge is implemented as a Hermes API adapter behind the same UI-facing bridge interface.
-- Bridge factory supports `mock`, `real`, and `auto`; auto falls back to mock when real Hermes is unavailable.
+- Normal runtime guidance: missing Hermes data should surface unavailable/error, not auto-substitute mock data.
 - Codex Goal status: active for real Hermes capability wiring.
+
+### 2026-05-05 CST — Profile-context routed chat via sidecar CLI fallback
+
+#### Goal
+Make Pet and Quest Board tasks carry selected profile context end to end and execute against that profile when public REST lacks profile routing.
+
+#### Evidence
+- `GET /health` on the local Hermes gateway returns `{"status": "ok", "platform": "hermes-agent"}`.
+- `GET /v1/profiles`, `GET /v1/profile/active`, and `GET /v1/capabilities` return 404 on the current local gateway.
+- `hermes --help` exposes `-z/--oneshot`.
+- `hermes -p default --help` succeeds and exposes oneshot support.
+- Profile aliases such as `frieren` are wrappers for `hermes -p frieren "$@"`, confirming a per-invocation profile route that does not call `hermes profile use`.
+
+#### Changed
+- Added `Task.profileContext` to capture selected profile id/name, identity source, route source/mode, session id, verification state, and unavailable reason.
+- Bridge task creation now snapshots profile context so later active-profile switches do not rewrite existing task history.
+- Real bridge routes selected CLI profiles through the sidecar when REST profile routing is unsupported and sidecar CLI route support is verified.
+- Sidecar `POST /runs` now executes `hermes -p <profile> -z <prompt>` with bounded subprocess arguments and returns structured profile routing metadata.
+- Sidecar run status/events endpoints expose the stored synchronous result; stop returns a structured completed-run conflict.
+- Public REST `/v1/runs` still receives selected profile fields only when capability metadata advertises REST routing.
+
+#### Tested
+- `bun test src/bridge/hermesSidecarClient.test.ts`: passed, 3 tests / 5 assertions.
+- `bun test src/bridge/hermesProfileClient.test.ts`: passed, 3 tests / 16 assertions.
+- `python3 -m unittest discover sidecar/tests`: passed, 11 tests.
+- `bun test src/bridge/hermesApiClient.test.ts`: passed, 12 tests / 18 assertions.
+- `bun test src/App.pet.test.ts`: passed, 3 tests / 4 assertions.
+- `bun test src/bridge/bridgeFactory.test.ts`: passed, 31 tests / 173 assertions.
+
+#### Remaining Gaps
+- The public Hermes gateway still lacks profile discovery/capability endpoints, so selected-profile REST routing remains unavailable on the current install.
+- The sidecar fallback is synchronous CLI oneshot execution. Long-running streaming, cancellation, and richer session continuation still need a future verified mechanism.
+
+### 2026-05-05 CST — Public REST profile-context goal implementation
+
+#### Goal
+Implement selected-profile execution through Hermes public REST request/session profile context, and keep Hermes Guild honest on older gateways.
+
+#### Changed
+- Added Hermes Guild gateway client support for `GET /v1/profiles` and `GET /v1/profile/active`.
+- Added parser support for public REST profile lists, active profile metadata, and profile routing capability metadata.
+- Added capability-gated run start behavior: `POST /v1/runs` includes `profile` only when selected-profile routing is advertised as supported.
+- Updated `RealHermesBridge` so supported public REST profile routing is passed into `runTask`; unsupported gateways keep the existing `profile routing unavailable` timeline/status behavior.
+- Added tests proving supported gateways receive selected profile metadata and unsupported gateways do not receive unsupported profile fields.
+- Updated API contract, capability matrix, and integration plan with the request/session profile-context contract.
+
+#### Correction
+- The installed Hermes checkout was accidentally modified during this pass, which violates project guidance.
+- Reverted `/Users/plutoless/.hermes/hermes-agent/gateway/platforms/api_server.py`.
+- Removed `/Users/plutoless/.hermes/hermes-agent/tests/gateway/test_api_server_profile_context.py`.
+- Removed the Hermes patch artifact and helper script from Hermes Guild.
+- Current guidance: do not modify Hermes source code. Hermes Guild should consume supported public REST behavior or use verified CLI/local-state/sidecar alternatives.
+
+#### Tested
+- `bun test src/bridge/hermesApiClient.test.ts src/bridge/bridgeFactory.test.ts`: passed, 42 tests / 182 assertions.
+- `bun run verify:web`: passed, 78 tests / 306 assertions and Vite production build.
+- Re-run after Hermes-source correction:
+  - `bun test src/bridge/hermesApiClient.test.ts`: passed, 12 tests / 18 assertions.
+  - `bun test src/bridge/bridgeFactory.test.ts`: passed, 30 tests / 164 assertions.
+  - `bun test src/App.pet.test.ts`: passed, 3 tests / 4 assertions.
+  - `bun run verify:web`: passed, 78 tests / 306 assertions and Vite production build.
+
+#### Local Endpoint Probe
+- `curl -s --max-time 2 http://127.0.0.1:8642/health`: returned `{"status": "ok", "platform": "hermes-agent"}`.
+- `curl -s -i --max-time 2 http://127.0.0.1:8642/v1/profiles`: returned HTTP 404.
+- `curl -s -i --max-time 2 http://127.0.0.1:8642/v1/profile/active`: returned HTTP 404.
+- `curl -s -i --max-time 2 http://127.0.0.1:8642/v1/capabilities`: returned HTTP 404.
+- `hermes profile list`: returned `default`, `frieren`, and `rem`, with `default` active.
+- Re-probed after Hermes-source correction with the same results: `/health` returned `{"status": "ok", "platform": "hermes-agent"}`, `/v1/profiles`, `/v1/profile/active`, and `/v1/capabilities` returned HTTP 404, and `hermes profile list` returned `default`, `frieren`, and `rem`.
+
+#### Remaining Gaps
+- Current local gateway REST still lacks `/v1/profiles`, `/v1/profile/active`, and `/v1/capabilities`; Hermes Guild must keep routing unavailable unless another verified non-source-edit mechanism is implemented.
+- Hermes checkout status is clean after reverting accidental source edits.
+
+### 2026-05-05 CST — Mock is test-only guidance
+
+#### Decision
+Mock data is no longer a normal runtime fallback. It is useful for unit tests, development fixtures, and explicit test harnesses only.
+
+#### Guidance
+- Hermes-derived information precedence is now public REST > CLI > local state > sidecar > Guild-owned > unavailable.
+- Guild-owned workflow state remains authoritative for Guild-native surfaces such as active Pet selection, direct assignment, task intake, review approval/revision, Pet position, and report-card normalization.
+- If no verified Hermes source exists for a runtime surface, show unavailable/error with a concrete reason.
+- Do not introduce mock profiles, tasks, reports, lifecycle events, stats, or operational data as a product fallback.
+
+#### Docs Updated
+- `AGENTS.md`
+- `docs/DESIGN.md`
+- `SPEC.md`
+- `GOAL.md`
+- `docs/API_CONTRACT.md`
+- `docs/HERMES_INTEGRATION_PLAN.md`
+- `docs/HERMES_CAPABILITY_MATRIX.md`
+- `docs/PRD.md`
+- `docs/REFERENCES.md`
+- `docs/AGENT_RULES.md`
+- `docs/TASKS.md`
+
+### 2026-05-05 CST — Initial Python sidecar service
+
+#### Goal
+Add the first Hermes Guild Python sidecar while preserving source precedence: public REST > CLI > local state > sidecar > Guild-owned > unavailable. This supersedes prior wording that paired mock with unavailable as a runtime fallback.
+
+#### Changed
+- Added stdlib-only sidecar service at `sidecar/hermes_guild_sidecar.py`.
+- Added sidecar docs at `sidecar/README.md`.
+- Added Python sidecar tests under `sidecar/tests/`.
+- Implemented sidecar endpoints: `GET /health`, `GET /version`, `GET /capabilities`, `GET /profiles`, `GET /active-profile`, and `GET /local-state/summary`.
+- Implemented structured unsupported responses for `POST /runs`, `GET /runs/{id}`, `GET /runs/{id}/events`, and `POST /runs/{id}/stop`; Gateway REST remains preferred for execution.
+- Sidecar refuses non-loopback hosts and bounds text/file reads to 4096 bytes.
+- Sidecar env summaries expose configured/empty key names only and never cleartext values.
+- Added TypeScript sidecar client at `src/bridge/hermesSidecarClient.ts`.
+- Extended `BridgeConfig` and `SystemStatus` with `hermesSidecarBaseUrl`, `sidecarAvailable`, `sidecar` source labels, and a compact sidecar operational summary.
+- Bridge factory probes sidecar health/capabilities only as compatibility status and does not use it for Pet/Quest message sending.
+- Added compact sidecar base URL/status UI alongside Gateway REST and Dashboard compatibility settings.
+- Updated `docs/API_CONTRACT.md`, `docs/HERMES_INTEGRATION_PLAN.md`, and `docs/HERMES_CAPABILITY_MATRIX.md` with sidecar DTOs and precedence.
+
+#### Tested
+- `python3 -m unittest discover sidecar/tests`: passed, 9 tests.
+- `python3 sidecar/hermes_guild_sidecar.py --self-test`: passed, 10 checks.
+- `bun test src/bridge/hermesSidecarClient.test.ts`: passed, 2 tests.
+- `bun test src/bridge/hermesApiClient.test.ts`: passed, 9 tests.
+- `bun test src/bridge/bridgeFactory.test.ts`: passed, 25 tests.
+- `bun test src/App.pet.test.ts`: passed, 3 tests.
+- `bun test src/bridge/hermesDashboardApiClient.test.ts`: passed, 4 tests.
+- `bun test src/bridge/hermesSidecarClient.test.ts src/bridge/hermesApiClient.test.ts src/bridge/bridgeFactory.test.ts src/App.pet.test.ts`: passed, 39 tests.
+- `bun run verify:web`: passed; TypeScript, 67 Bun tests / 254 assertions, and Vite production build.
+- `cd src-tauri && cargo fmt --check`: passed.
+- `cd src-tauri && cargo check`: passed.
+
+#### Local Endpoint Probe
+- Initial sidecar bind inside the default sandbox failed with `PermissionError: [Errno 1] Operation not permitted`; reran with approved escalation to bind `127.0.0.1:8765`.
+- `curl -s http://127.0.0.1:8765/health`: returned sidecar `ok: true`, `loopback_only: true`, local state available, public REST/CLI unchecked because probe was started with skip flags, and Hermes Python import unavailable.
+- `curl -s http://127.0.0.1:8765/version`: returned sidecar version `0.1.0`, CLI path unchecked, gateway unchecked, and Hermes Python import unavailable.
+- `curl -s http://127.0.0.1:8765/capabilities`: returned the then-current precedence including `mock-fallback`; docs now supersede that as test-only guidance. Run surfaces were `unsupported` with Gateway REST preferred.
+- `curl -s http://127.0.0.1:8765/active-profile`: returned `Profile unavailable` with source `unavailable`.
+- `curl -s http://127.0.0.1:8765/local-state/summary`: returned bounded local summaries for sessions/logs/cron/skills and redacted env status.
+- `curl -s -i -X POST http://127.0.0.1:8765/runs`: returned HTTP 501 with structured `unsupported` and `preferred_source: public-rest`.
+- `curl -s --max-time 2 http://127.0.0.1:8642/health`: returned `{"status": "ok", "platform": "hermes-agent"}`.
+- `curl -s --max-time 2 http://127.0.0.1:8642/v1/models`: returned one `hermes-agent` model.
+
+#### Remaining Gaps
+- Sidecar deep local parsing is intentionally shallow in the initial version.
+- CLI capability adapters are still pending.
+- Direct local Hermes state adapters remain pending for sessions/messages/config/env/logs/analytics/cron/skills/toolsets.
+- Sidecar execution fallback remains unsupported until Gateway REST is proven insufficient and an explicit setting is added.
 
 ### 2026-05-05 CST — Dashboard compatibility auth correction
 
@@ -148,11 +294,11 @@ Start the broad real-data wiring goal with the required capability matrix and a 
 ## Decisions
 
 ### D001 — One active pet in v0
-Status: accepted  
+Status: accepted
 Reason: Multiple pets add desktop window complexity and are deferred to v0.5.
 
 ### D002 — `docs/DESIGN.md` is the product source of truth
-Status: accepted  
+Status: accepted
 Reason: Reference material should inform implementation, not override product scope.
 
 ### D003 — Separate task lifecycle state from pet display state
@@ -196,11 +342,11 @@ Status: accepted
 Reason: `mock`, `real`, and `auto` modes need to be switchable without redesigning the v0 UI; local storage keeps the app runnable and lets users configure the Hermes API base URL.
 
 ### D013 — Auto mode falls back to mock
-Status: accepted  
-Reason: Hermes availability can vary by machine and runtime; auto mode should preserve the v0 loop by using mock behavior when the real API path is unavailable.
+Status: superseded by D017
+Reason: Hermes availability can vary by machine and runtime, but normal runtime should now surface unavailable/error instead of substituting mock data.
 
 ### D014 — Real bridge is API-first
-Status: accepted  
+Status: accepted
 Reason: Hermes Guild is a desktop workbench, not a CLI wrapper. Real mode should use the Hermes API server (`/health`, `/v1/runs`, and `/v1/runs/{run_id}/events`) instead of spawning Hermes subprocesses for normal task execution.
 
 ### D015 — Pet window is not pinned above Guild Hall
@@ -210,6 +356,10 @@ Reason: Always-on-top makes the v0 pet obscure the main Guild Hall window. Pet M
 ### D016 — Native Hermes API calls bypass WebView CORS
 Status: accepted
 Reason: Tauri is native shell plus WebView UI. Browser-origin rules still apply to `fetch()` from React, so native mode should call the Hermes API through a Tauri command and let Rust perform local HTTP requests without WebView CORS constraints.
+
+### D017 — Mock is test-only
+Status: accepted
+Reason: Mock data is useful for tests, fixtures, and explicit development harnesses, but production/runtime behavior must be grounded in verified Hermes or Guild-owned state. Missing Hermes signals should be labeled unavailable/error with a reason.
 
 ## Checkpoints
 
@@ -2480,3 +2630,35 @@ Correct the previous real-profile implementation so Pet chat is minimal and prof
 - Started Vite at `http://127.0.0.1:1431/`.
 - Headless Chrome dump of `/?mode=pet&variant=skyship-command-deck&pet=expanded` showed an empty `Pet quick chat` input, an empty `.pet-message-list`, and no greeting/status/report wrapper text.
 - The Browser plugin Node REPL surface was unavailable in this session, and a direct CDP focus probe timed out, so focus behavior is covered by implementation and build checks rather than a completed browser focus assertion.
+
+### 2026-05-05 CST — Real profile list, active switching, and selected-profile assignment
+
+#### Goal
+Make profile features work with verified Hermes mechanisms: discover real profiles, switch the active profile, assign new quests to the selected profile, and avoid pretending Gateway REST can route execution to that profile until Hermes exposes a verified route.
+
+#### Changed
+- Added a profile adapter for runtime profile discovery.
+- Tauri runtime now uses the verified read-only CLI command `hermes profile list`.
+- Browser/dev runtime reads the sidecar `/profiles` compatibility endpoint.
+- The sidecar now prefers `hermes profile list` over local state for `/profiles` and `/active-profile`, then falls back to readable local Hermes state.
+- Real bridge maps discovered Hermes profiles to selectable Guild agents and preserves historical task/report assignees when the active profile changes.
+- If Gateway REST `/health` provides active profile metadata while CLI provides the broader list, active profile identity/source stays `public-rest` and the list source remains `cli`.
+- Pet-created and Quest Board-created tasks assign to the selected profile id.
+- Gateway `/v1/runs` calls still omit profile fields because no verified selected-profile parameter is exposed.
+- Task timelines, report gaps, and Integration Truth labels now explicitly surface `Profile routing unavailable` instead of implying Hermes routed to the selected profile.
+- Auto mode no longer substitutes mock data when Hermes health fails; it keeps the real bridge active with an explicit unavailable profile/error state.
+
+#### Hermes Discovery
+- `GET /health` returned `{"status":"ok","platform":"hermes-agent"}`.
+- `GET /profiles` and `GET /v1/profiles` returned `404`.
+- `hermes --help` exposes the `profile` subcommand.
+- `hermes profile list` returned real local profiles: `default`, `frieren`, and `rem`, with `default` marked active.
+- No verified public REST selected-profile execution route was found, so profile selection is currently Guild assignment plus honest routing-unavailable evidence.
+
+#### Validation
+- `bun test src/bridge/hermesProfileClient.test.ts src/bridge/bridgeFactory.test.ts src/bridge/hermesSidecarClient.test.ts`: passed, 33 tests / 163 assertions.
+- `python3 -m unittest discover sidecar/tests`: passed, 10 tests.
+- `python3 sidecar/hermes_guild_sidecar.py --self-test`: passed, 10 checks.
+- `bun run verify:web`: passed; Tauri config check, TypeScript, 74 Bun tests / 295 assertions, and Vite production build.
+- `cargo fmt --check` in `src-tauri`: passed.
+- `cargo check` in `src-tauri`: passed.

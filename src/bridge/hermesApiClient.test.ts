@@ -90,6 +90,53 @@ describe('hermesApiClient', () => {
     });
   });
 
+  test('native client includes selected profile only when routing is capability-supported', async () => {
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const client = new NativeHermesApiClient('http://127.0.0.1:8642', async (command, args) => {
+      calls.push({ command, args });
+      if (args?.method === 'POST') {
+        return { status: 202, body: JSON.stringify({ run_id: 'run_123', status: 'started', profile: 'frieren' }) };
+      }
+      return { status: 200, body: 'data: {"event":"run.completed","output":"done"}\n\n' };
+    });
+
+    await client.runTask({
+      input: 'Use selected profile.',
+      sessionId: 'task-1',
+      profile: { id: 'frieren', name: 'frieren', source: 'public-rest', executionRouting: 'supported' },
+      profileRoutingSupported: true,
+    });
+
+    expect(calls[0].args?.body).toEqual({
+      input: 'Use selected profile.',
+      session_id: 'task-1',
+      profile: 'frieren',
+    });
+  });
+
+  test('native client omits selected profile when routing is not supported', async () => {
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const client = new NativeHermesApiClient('http://127.0.0.1:8642', async (command, args) => {
+      calls.push({ command, args });
+      if (args?.method === 'POST') {
+        return { status: 202, body: JSON.stringify({ run_id: 'run_123', status: 'started' }) };
+      }
+      return { status: 200, body: 'data: {"event":"run.completed","output":"done"}\n\n' };
+    });
+
+    await client.runTask({
+      input: 'Use selected profile.',
+      sessionId: 'task-1',
+      profile: { id: 'frieren', name: 'frieren', source: 'cli', executionRouting: 'unsupported' },
+      profileRoutingSupported: false,
+    });
+
+    expect(calls[0].args?.body).toEqual({
+      input: 'Use selected profile.',
+      session_id: 'task-1',
+    });
+  });
+
   test('native client reports the gateway run id before reading events', async () => {
     const startedRuns: string[] = [];
     const client = new NativeHermesApiClient('http://127.0.0.1:8642', async (_command, args) => {
@@ -118,6 +165,8 @@ describe('hermesApiClient', () => {
     await client.checkDetailedHealth?.();
     await client.listModels?.();
     await client.getCapabilities?.();
+    await client.listProfiles?.();
+    await client.getActiveProfile?.();
     await client.createChatCompletion?.({ messages: [] });
     await client.createResponse?.({ input: 'hello' });
     await client.getResponse?.('resp 1');
@@ -137,6 +186,8 @@ describe('hermesApiClient', () => {
       { method: 'GET', url: 'http://127.0.0.1:8642/health/detailed' },
       { method: 'GET', url: 'http://127.0.0.1:8642/v1/models' },
       { method: 'GET', url: 'http://127.0.0.1:8642/v1/capabilities' },
+      { method: 'GET', url: 'http://127.0.0.1:8642/v1/profiles' },
+      { method: 'GET', url: 'http://127.0.0.1:8642/v1/profile/active' },
       { method: 'POST', url: 'http://127.0.0.1:8642/v1/chat/completions', body: { messages: [] } },
       { method: 'POST', url: 'http://127.0.0.1:8642/v1/responses', body: { input: 'hello' } },
       { method: 'GET', url: 'http://127.0.0.1:8642/v1/responses/resp%201' },
@@ -167,6 +218,47 @@ describe('hermesApiClient', () => {
       status: 404,
       data: { error: { message: 'endpoint missing' } },
       error: 'endpoint missing',
+    });
+  });
+
+  test('native client parses public REST profiles and profile routing capability metadata', async () => {
+    const client = new NativeHermesApiClient('http://127.0.0.1:8642', async (_command, args) => {
+      if (String(args?.url).endsWith('/v1/profiles')) {
+        return {
+          status: 200,
+          body: JSON.stringify({
+            profiles: [
+              { id: 'default', name: 'default' },
+              { id: 'frieren', name: 'frieren' },
+            ],
+            active_profile: 'frieren',
+            capabilities: {
+              profiles: {
+                run_routing: true,
+                request_context: true,
+                session_context: true,
+              },
+            },
+          }),
+        };
+      }
+      return { status: 404, body: JSON.stringify({ error: { message: 'missing' } }) };
+    });
+
+    const result = await client.listProfiles?.();
+
+    expect(result).toEqual({
+      ok: true,
+      profiles: [
+        { id: 'default', name: 'default', source: 'public-rest', active: false, executionRouting: 'supported' },
+        { id: 'frieren', name: 'frieren', source: 'public-rest', active: true, executionRouting: 'supported' },
+      ],
+      activeProfileId: 'frieren',
+      activeProfileSource: 'public-rest',
+      source: 'public-rest',
+      message: '2 profiles discovered from public REST.',
+      executionRouting: 'supported',
+      executionRoutingReason: undefined,
     });
   });
 

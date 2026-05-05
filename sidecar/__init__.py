@@ -1,0 +1,2 @@
+"""Hermes Guild sidecar package."""
+

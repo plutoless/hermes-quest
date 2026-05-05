@@ -2,7 +2,21 @@ import { createMockHermesBridge } from './mockHermesBridge';
 import { RealHermesBridge } from './realHermesBridge';
 import { createDefaultHermesApiClient, normalizeBaseUrl } from './hermesApiClient';
 import { createDefaultHermesDashboardApiClient } from './hermesDashboardApiClient';
-import type { BridgeConfig, HermesApiClient, HermesBridgeApi, HermesDashboardApiClient, HermesDashboardStatus } from './types';
+import { createDefaultHermesProfileClient } from './hermesProfileClient';
+import { createDefaultHermesProfileRunClient } from './hermesProfileRunClient';
+import { createDefaultHermesSidecarClient } from './hermesSidecarClient';
+import type {
+  BridgeConfig,
+  HermesApiClient,
+  HermesBridgeApi,
+  HermesDashboardApiClient,
+  HermesDashboardStatus,
+  HermesProfileClient,
+  HermesProfileListResult,
+  HermesProfileRunClient,
+  HermesSidecarClient,
+  HermesSidecarStatus,
+} from './types';
 
 const configStorageKey = 'hermes-guild.bridge-config';
 
@@ -10,11 +24,15 @@ const defaultConfig: BridgeConfig = {
   bridgeMode: 'auto',
   hermesApiBaseUrl: 'http://127.0.0.1:8642',
   hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
+  hermesSidecarBaseUrl: 'http://127.0.0.1:8765',
 };
 
 interface BridgeFactoryOptions {
   apiClient?: HermesApiClient;
   dashboardClient?: HermesDashboardApiClient;
+  sidecarClient?: HermesSidecarClient;
+  profileClient?: HermesProfileClient;
+  profileRunClient?: HermesProfileRunClient;
   persistMock?: boolean;
 }
 
@@ -35,10 +53,13 @@ export function saveBridgeConfig(config: BridgeConfig) {
   localStorage.setItem(configStorageKey, JSON.stringify(sanitizeConfig(config)));
 }
 
-export async function createBridgeFromConfig(config: BridgeConfig, options: BridgeFactoryOptions = {}): Promise<HermesBridgeApi> {
+export async function createBridgeFromConfig(config: Partial<BridgeConfig>, options: BridgeFactoryOptions = {}): Promise<HermesBridgeApi> {
   const sanitized = sanitizeConfig(config);
   const apiClient = options.apiClient ?? await createDefaultHermesApiClient(sanitized.hermesApiBaseUrl);
   const dashboardClient = options.dashboardClient ?? await createDefaultHermesDashboardApiClient(sanitized.hermesDashboardBaseUrl);
+  const sidecarClient = options.sidecarClient ?? await createDefaultHermesSidecarClient(sanitized.hermesSidecarBaseUrl);
+  const profileClient = options.profileClient ?? await createDefaultHermesProfileClient(sanitized.hermesSidecarBaseUrl);
+  const profileRunClient = options.profileRunClient ?? await createDefaultHermesProfileRunClient();
 
   if (sanitized.bridgeMode === 'mock') {
     return decorateMockBridge(createMockHermesBridge({ persist: options.persistMock ?? false }), {
@@ -46,30 +67,47 @@ export async function createBridgeFromConfig(config: BridgeConfig, options: Brid
       activeImplementation: 'mock',
       hermesAvailable: 'unchecked',
       dashboardAvailable: 'unchecked',
+      sidecarAvailable: 'unchecked',
       hermesDashboardBaseUrl: sanitized.hermesDashboardBaseUrl,
+      hermesSidecarBaseUrl: sanitized.hermesSidecarBaseUrl,
       logsSummary: 'Bridge mode: mock. Active implementation: mock. Mock Hermes Bridge is driving lifecycle events locally.',
     });
   }
 
-  const realBridge = new RealHermesBridge(sanitized, apiClient);
+  const realBridge = new RealHermesBridge(sanitized, apiClient, sidecarClient, profileRunClient);
   const health = await realBridge.getHealth?.();
   const dashboardStatus = health?.ok ? await dashboardClient.checkStatus() : undefined;
+  const sidecarStatus = health?.ok ? await sidecarClient.checkHealth() : undefined;
+  const sidecarCapabilities = health?.ok && sidecarStatus?.ok ? await sidecarClient.getCapabilities() : undefined;
+  const gatewayProfileList = health?.ok ? await apiClient.listProfiles?.() : undefined;
+  const rawProfileList = health?.ok && gatewayProfileList?.ok ? gatewayProfileList : health?.ok ? await profileClient?.listProfiles() : undefined;
+  const profileList = applySidecarExecutionRouting(rawProfileList, sidecarCapabilities?.ok ? sidecarCapabilities.data : undefined);
 
   if (sanitized.bridgeMode === 'real') {
     const dashboardPatch = statusFromDashboard(sanitized, dashboardStatus);
+    const sidecarPatch = statusFromSidecar(sanitized, sidecarStatus);
     realBridge.setRuntimeStatus({
       bridgeMode: 'real',
       activeImplementation: 'real',
       hermesAvailable: health?.ok ? 'available' : 'unavailable',
       hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
       ...dashboardPatch,
+      ...sidecarPatch,
+      dataSources: {
+        ...dashboardPatch.dataSources,
+        ...sidecarPatch.dataSources,
+      },
+      warnings: [...(dashboardPatch.warnings ?? []), ...(sidecarPatch.warnings ?? [])],
       logsSummary: health?.ok
-        ? `Bridge mode: real. Active implementation: real. Hermes available: ${health.message}. ${dashboardPatch.logsSummary}`
+        ? `Bridge mode: real. Active implementation: real. Hermes available: ${health.message}. ${dashboardPatch.logsSummary} ${sidecarPatch.logsSummary}`
         : `Bridge mode: real. Active implementation: real. Hermes unavailable: ${health?.message ?? 'health check failed'}`,
     });
     if (health?.ok) {
-      realBridge.applyHermesProfile(health.profile);
+      applyVerifiedProfiles(realBridge, health.profile, profileList);
       await applyGatewayMetadata(realBridge, apiClient);
+      if (sidecarStatus?.ok) {
+        await applySidecarCompatibility(realBridge, sidecarClient);
+      }
       if (dashboardStatus?.ok) {
         await applyDashboardCompatibilityInventory(realBridge, dashboardClient);
       }
@@ -82,16 +120,26 @@ export async function createBridgeFromConfig(config: BridgeConfig, options: Brid
 
   if (health?.ok) {
     const dashboardPatch = statusFromDashboard(sanitized, dashboardStatus);
+    const sidecarPatch = statusFromSidecar(sanitized, sidecarStatus);
     realBridge.setRuntimeStatus({
       bridgeMode: 'auto',
       activeImplementation: 'real',
       hermesAvailable: 'available',
       hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
       ...dashboardPatch,
-      logsSummary: `Bridge mode: auto. Active implementation: real. Hermes available: ${health.message}. ${dashboardPatch.logsSummary}`,
+      ...sidecarPatch,
+      dataSources: {
+        ...dashboardPatch.dataSources,
+        ...sidecarPatch.dataSources,
+      },
+      warnings: [...(dashboardPatch.warnings ?? []), ...(sidecarPatch.warnings ?? [])],
+      logsSummary: `Bridge mode: auto. Active implementation: real. Hermes available: ${health.message}. ${dashboardPatch.logsSummary} ${sidecarPatch.logsSummary}`,
     });
-    realBridge.applyHermesProfile(health.profile);
+    applyVerifiedProfiles(realBridge, health.profile, profileList);
     await applyGatewayMetadata(realBridge, apiClient);
+    if (sidecarStatus?.ok) {
+      await applySidecarCompatibility(realBridge, sidecarClient);
+    }
     if (dashboardStatus?.ok) {
       await applyDashboardCompatibilityInventory(realBridge, dashboardClient);
     }
@@ -99,20 +147,52 @@ export async function createBridgeFromConfig(config: BridgeConfig, options: Brid
   }
 
   const fallbackMessage = health?.message ?? 'Real Hermes health check did not return a result.';
-  return decorateMockBridge(
-    createMockHermesBridge({ persist: options.persistMock ?? false }),
-    {
-      bridgeMode: 'auto',
-      activeImplementation: 'mock',
-      hermesAvailable: 'unavailable',
-      fallbackReason: fallbackMessage,
-      hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
-      hermesDashboardBaseUrl: sanitized.hermesDashboardBaseUrl,
-      dashboardAvailable: 'unchecked',
-      logsSummary: `Bridge mode: auto. Active implementation: mock; fallback to mock. ${fallbackMessage}`,
-    },
-    `Auto mode fallback: ${fallbackMessage}`,
-  );
+  realBridge.applyHermesProfile(undefined);
+  realBridge.setRuntimeStatus({
+    bridgeMode: 'auto',
+    activeImplementation: 'real',
+    hermesAvailable: 'unavailable',
+    hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
+    hermesDashboardBaseUrl: sanitized.hermesDashboardBaseUrl,
+    hermesSidecarBaseUrl: sanitized.hermesSidecarBaseUrl,
+    dashboardAvailable: 'unchecked',
+    sidecarAvailable: 'unchecked',
+  });
+  realBridge.markUnavailable(fallbackMessage);
+  return realBridge;
+}
+
+function applyVerifiedProfiles(
+  realBridge: RealHermesBridge,
+  healthProfile: Parameters<RealHermesBridge['applyHermesProfile']>[0],
+  profileList: HermesProfileListResult | undefined,
+) {
+  if (profileList?.ok && profileList.profiles.length > 0) {
+    realBridge.applyHermesProfiles(healthProfile ? mergeRestActiveProfile(profileList, healthProfile) : profileList);
+    return;
+  }
+
+  realBridge.applyHermesProfile(healthProfile);
+}
+
+function mergeRestActiveProfile(
+  profileList: HermesProfileListResult,
+  healthProfile: NonNullable<Parameters<RealHermesBridge['applyHermesProfile']>[0]>,
+): HermesProfileListResult {
+  const activeProfile = {
+    ...profileList.profiles.find((profile) => profile.id === healthProfile.id),
+    ...healthProfile,
+    source: healthProfile.source ?? 'public-rest' as const,
+  };
+  const profiles = profileList.profiles.some((profile) => profile.id === healthProfile.id)
+    ? profileList.profiles.map((profile) => profile.id === healthProfile.id ? activeProfile : profile)
+    : [activeProfile, ...profileList.profiles];
+  return {
+    ...profileList,
+    profiles,
+    activeProfileId: activeProfile.id,
+    activeProfileSource: activeProfile.source,
+  };
 }
 
 async function applyGatewayMetadata(realBridge: RealHermesBridge, apiClient: HermesApiClient) {
@@ -130,6 +210,38 @@ async function applyGatewayMetadata(realBridge: RealHermesBridge, apiClient: Her
   if (jobs?.ok) {
     realBridge.applyOperationalData({ gatewayJobs: jobs.data });
   }
+}
+
+async function applySidecarCompatibility(realBridge: RealHermesBridge, sidecarClient: HermesSidecarClient) {
+  const [capabilities, localStateSummary] = await Promise.all([
+    sidecarClient.getCapabilities(),
+    sidecarClient.getLocalStateSummary(),
+  ]);
+  realBridge.applySidecarCompatibility({
+    capabilities: capabilities.ok ? capabilities.data : undefined,
+    localStateSummary: localStateSummary.ok ? localStateSummary.data : undefined,
+  });
+}
+
+function applySidecarExecutionRouting(
+  profileList: HermesProfileListResult | undefined,
+  sidecarCapabilities: unknown,
+): HermesProfileListResult | undefined {
+  if (!profileList?.ok || profileList.executionRouting === 'supported') return profileList;
+  if (profileList.source !== 'cli' || !sidecarRunsSupported(sidecarCapabilities)) return profileList;
+  const reason = sidecarRunReason(sidecarCapabilities) ?? 'Verified CLI route through Hermes Guild sidecar.';
+  return {
+    ...profileList,
+    profiles: profileList.profiles.map((profile) => ({
+      ...profile,
+      executionRouting: 'supported',
+      unavailableReason: undefined,
+    })),
+    executionRouting: 'supported',
+    executionRoutingReason: reason,
+    executionRoutingSource: 'sidecar',
+    executionRoutingMode: 'sidecar',
+  };
 }
 
 async function applyDashboardCompatibilityInventory(realBridge: RealHermesBridge, dashboardClient: HermesDashboardApiClient) {
@@ -189,6 +301,30 @@ function firstIdFromCollection(payload: unknown, keys: string[]) {
   return typeof candidate.id === 'string' ? candidate.id : typeof candidate.session_id === 'string' ? candidate.session_id : undefined;
 }
 
+function sidecarRunsSupported(payload: unknown) {
+  const runs = sidecarRunsCapability(payload);
+  return stringField(runs?.status) === 'available';
+}
+
+function sidecarRunReason(payload: unknown) {
+  return stringField(sidecarRunsCapability(payload)?.reason);
+}
+
+function sidecarRunsCapability(payload: unknown): Record<string, unknown> | undefined {
+  if (!payload || typeof payload !== 'object') return undefined;
+  const candidate = payload as Record<string, unknown>;
+  const capabilities = objectField(candidate.capabilities);
+  return objectField(capabilities?.runs) ?? objectField(candidate.runs);
+}
+
+function objectField(value: unknown) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+}
+
+function stringField(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
 function collectionFromPayload(payload: unknown, keys: string[]) {
   if (Array.isArray(payload)) return payload;
   if (!payload || typeof payload !== 'object') return [];
@@ -214,10 +350,14 @@ function sanitizeConfig(raw: unknown): BridgeConfig {
   const hermesDashboardBaseUrl = typeof candidate.hermesDashboardBaseUrl === 'string' && candidate.hermesDashboardBaseUrl.trim()
     ? normalizeBaseUrl(candidate.hermesDashboardBaseUrl, defaultConfig.hermesDashboardBaseUrl)
     : defaultConfig.hermesDashboardBaseUrl;
+  const hermesSidecarBaseUrl = typeof candidate.hermesSidecarBaseUrl === 'string' && candidate.hermesSidecarBaseUrl.trim()
+    ? normalizeBaseUrl(candidate.hermesSidecarBaseUrl, defaultConfig.hermesSidecarBaseUrl)
+    : defaultConfig.hermesSidecarBaseUrl;
   return {
     bridgeMode,
     hermesApiBaseUrl,
     hermesDashboardBaseUrl,
+    hermesSidecarBaseUrl,
   };
 }
 
@@ -249,6 +389,22 @@ function statusFromDashboard(config: BridgeConfig, status: HermesDashboardStatus
   } satisfies Partial<ReturnType<HermesBridgeApi['getSnapshot']>['systemStatus']>;
 }
 
+function statusFromSidecar(config: BridgeConfig, status: HermesSidecarStatus | undefined) {
+  const sidecarAvailable = status?.ok ? 'available' : 'unavailable';
+  const warning = status?.ok || !status ? undefined : `Hermes Guild sidecar unavailable: ${status.message}`;
+  return {
+    sidecarAvailable,
+    hermesSidecarBaseUrl: config.hermesSidecarBaseUrl,
+    dataSources: {
+      sidecar: status?.ok ? 'sidecar' : 'unavailable',
+    },
+    logsSummary: status?.ok
+      ? `Sidecar compatibility available: ${status.message}`
+      : `Sidecar compatibility unavailable: ${status?.message ?? 'health check did not run'}`,
+    warnings: warning ? [warning] : [],
+  } satisfies Partial<ReturnType<HermesBridgeApi['getSnapshot']>['systemStatus']>;
+}
+
 function decorateMockBridge(
   bridge: HermesBridgeApi,
   statusPatch: Pick<
@@ -258,7 +414,13 @@ function decorateMockBridge(
     Partial<
       Pick<
         ReturnType<HermesBridgeApi['getSnapshot']>['systemStatus'],
-        'fallbackReason' | 'hermesApiBaseUrl' | 'hermesDashboardBaseUrl' | 'dashboardAvailable' | 'dataSources'
+        | 'fallbackReason'
+        | 'hermesApiBaseUrl'
+        | 'hermesDashboardBaseUrl'
+        | 'hermesSidecarBaseUrl'
+        | 'dashboardAvailable'
+        | 'sidecarAvailable'
+        | 'dataSources'
       >
     >,
   warning?: string,

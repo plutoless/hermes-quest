@@ -10,6 +10,8 @@ One-sentence positioning:
 
 The key rule is that the game layer must map to real Hermes capability and state. RPG is the interaction language; the v0 product value is task execution, review, and operational visibility.
 
+Mock data is not a production fallback. It is useful for tests, fixtures, and explicit development harnesses only. In normal runtime, missing Hermes data should surface as unavailable or error with a clear reason, not as substituted mock profiles, tasks, stats, reports, or lifecycle events.
+
 ## Product Shape
 
 ### Pet Mode
@@ -83,6 +85,19 @@ The interface should use RPG concepts only when they represent useful Hermes dat
 | Infirmary | Logs, diagnostics, provider/gateway health |
 | Archive / Library | Memory, docs, decision log, historical tasks |
 | Quest Board | Task intake and tracking |
+
+## Source Truth
+
+For Hermes-derived information, use this precedence:
+
+1. Public official Hermes REST APIs.
+2. Hermes CLI.
+3. Safe local Hermes state.
+4. Hermes Guild Python sidecar.
+5. Guild-owned workflow state for Guild-native surfaces.
+6. Unavailable with a visible reason.
+
+Guild-owned workflow state is authoritative for Guild-native actions such as active Pet selection, direct assignment, task intake fields, review approval/revision, Pet position, and report-card normalization. Mock data is test-only and should not appear as a real runtime source.
 
 ### Traits
 

@@ -189,7 +189,7 @@ Required:
 - bridge mode
 - execution source
 - fallback status
-- real/mock/auto truth if available
+- real/auto/unavailable truth if available
 
 Must be visible but not dominant.
 
@@ -274,15 +274,15 @@ One high-fidelity main screen is better than many shallow pages.
 Do not break:
 
 - RealHermes bridge
-- mock mode
 - real mode
 - auto mode
+- explicit test/dev mock harnesses
 - pet -> quest -> timeline -> report card -> review loop
 - visible integration truth
 - approve / revise flow
 - error handling
 
-If any data is still mocked, label it honestly.
+If any test/dev harness data is mocked, label it honestly. Do not use mock data as normal runtime fallback.
 
 If profile routing is not real, do not imply it is real.
 
@@ -365,7 +365,8 @@ This pass is successful when:
 - command input is easy to find
 - the implementation is structurally close to the preferred low-density generated design
 - RealHermes bridge is not broken
-- mock/real/auto modes are not broken
+- real/auto behavior is not broken
+- explicit test/dev mock harnesses are not broken
 - approve/revise flow is not broken
 - build/typecheck/lint/test are run if available
 - README and EXECUTION_LOG are updated if needed

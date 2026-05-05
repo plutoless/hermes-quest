@@ -25,7 +25,7 @@ Do not expand v0 scope. Deferred features must be recorded under Scope Guard in 
 - [x] T006 Add pet -> Guild Hall open action.
 - [x] T007 Persist or mock pet position if feasible; otherwise document fallback.
 
-## Phase 2 — Mock Hermes Bridge
+## Phase 2 — Test Mock Hermes Bridge
 
 - [x] T008 Implement mock agents: Researcher, Builder, Reviewer.
 - [x] T009 Implement active profile selection.
@@ -38,11 +38,11 @@ Do not expand v0 scope. Deferred features must be recorded under Scope Guard in 
 - [x] T013 Guild Hall shows active profile, active quest, and pending reviews.
 - [x] T014 Quest Board shows task list.
 - [x] T015 Task Detail shows task timeline.
-- [x] T016 Timeline updates from mock bridge events.
+- [x] T016 Timeline updates from bridge events.
 
 ## Phase 4 — Review Loop
 
-- [x] T017 Generate Quest Report Card when mock task completes.
+- [x] T017 Generate Quest Report Card when task completes.
 - [x] T018 Show completed tasks in Review.
 - [x] T019 Implement Approve.
 - [x] T020 Implement Revise with instructions.
@@ -69,3 +69,9 @@ Do not expand v0 scope. Deferred features must be recorded under Scope Guard in 
 - [x] T035 Show bridge mode / fallback status in the visible system strip.
 - [x] T036 Update README with mock / real / auto setup.
 - [x] T037 Run relevant build/test/lint verification.
+
+## Current Runtime Guidance
+
+- Mock bridge behavior is retained for tests and explicit development harnesses only.
+- Normal runtime should prefer public REST > CLI > local state > sidecar > Guild-owned > unavailable.
+- Do not add or preserve auto mock fallback as a product behavior.

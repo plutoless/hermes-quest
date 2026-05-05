@@ -1,4 +1,4 @@
-import type { Agent, BridgeEvent, BridgeSnapshot, CreateTaskInput, PetPosition, ReportCard, Task } from '../types';
+import type { Agent, BridgeEvent, BridgeSnapshot, CreateTaskInput, PetPosition, ProfileContext, ReportCard, Task } from '../types';
 
 export type BridgeMode = 'mock' | 'real' | 'auto';
 export type Listener = (snapshot: BridgeSnapshot, event: BridgeEvent) => void;
@@ -7,11 +7,20 @@ export interface BridgeConfig {
   bridgeMode: BridgeMode;
   hermesApiBaseUrl: string;
   hermesDashboardBaseUrl: string;
+  hermesSidecarBaseUrl: string;
 }
 
 export interface HermesProfileMetadata {
   id: string;
   name: string;
+  source?: HermesDataSource;
+  role?: 'Researcher' | 'Builder' | 'Reviewer';
+  active?: boolean;
+  model?: string;
+  alias?: string;
+  gatewayStatus?: string;
+  executionRouting?: 'supported' | 'unsupported' | 'unknown';
+  unavailableReason?: string;
 }
 
 export interface HermesHealth {
@@ -24,6 +33,8 @@ export interface HermesApiRunTaskInput {
   input: string;
   instructions?: string;
   sessionId?: string;
+  profile?: HermesProfileMetadata;
+  profileRoutingSupported?: boolean;
   onRunStarted?: (runId: string) => void;
 }
 
@@ -50,6 +61,7 @@ export interface HermesApiRunTaskResult {
   error?: string;
   runId?: string;
   events: HermesApiRunEvent[];
+  profileContext?: ProfileContext;
 }
 
 export interface HermesApiClient {
@@ -57,6 +69,8 @@ export interface HermesApiClient {
   checkDetailedHealth?(): Promise<HermesEndpointResult<unknown>>;
   listModels?(): Promise<HermesEndpointResult<unknown>>;
   getCapabilities?(): Promise<HermesEndpointResult<unknown>>;
+  listProfiles?(): Promise<HermesProfileListResult>;
+  getActiveProfile?(): Promise<HermesEndpointResult<unknown>>;
   createChatCompletion?(body: unknown): Promise<HermesEndpointResult<unknown>>;
   createResponse?(body: unknown): Promise<HermesEndpointResult<unknown>>;
   getResponse?(responseId: string): Promise<HermesEndpointResult<unknown>>;
@@ -71,6 +85,10 @@ export interface HermesApiClient {
   pauseJob?(jobId: string): Promise<HermesEndpointResult<unknown>>;
   resumeJob?(jobId: string): Promise<HermesEndpointResult<unknown>>;
   runJob?(jobId: string): Promise<HermesEndpointResult<unknown>>;
+  runTask(input: HermesApiRunTaskInput): Promise<HermesApiRunTaskResult>;
+}
+
+export interface HermesProfileRunClient {
   runTask(input: HermesApiRunTaskInput): Promise<HermesApiRunTaskResult>;
 }
 
@@ -112,6 +130,53 @@ export interface HermesDashboardApiClient {
   listSkills(): Promise<HermesEndpointResult<unknown>>;
   toggleSkill(body: unknown): Promise<HermesEndpointResult<unknown>>;
   listToolsets(): Promise<HermesEndpointResult<unknown>>;
+}
+
+export interface HermesSidecarStatus {
+  ok: boolean;
+  message: string;
+  data?: unknown;
+}
+
+export interface HermesSidecarClient {
+  checkHealth(): Promise<HermesSidecarStatus>;
+  getCapabilities(): Promise<HermesEndpointResult<unknown>>;
+  getLocalStateSummary(): Promise<HermesEndpointResult<unknown>>;
+  listProfiles?(): Promise<HermesEndpointResult<unknown>>;
+  getActiveProfile?(): Promise<HermesEndpointResult<unknown>>;
+  runTask?(input: HermesApiRunTaskInput): Promise<HermesApiRunTaskResult>;
+  getRun?(runId: string): Promise<HermesEndpointResult<unknown>>;
+  stopRun?(runId: string): Promise<HermesEndpointResult<unknown>>;
+}
+
+export type HermesDataSource =
+  | 'public-rest'
+  | 'gateway-rest'
+  | 'cli'
+  | 'local-state'
+  | 'local-hermes-state'
+  | 'sidecar'
+  | 'dashboard-compatibility'
+  | 'guild-owned'
+  | 'mock-fallback'
+  | 'unavailable'
+  | 'cli-pty';
+
+export interface HermesProfileListResult {
+  ok: boolean;
+  profiles: HermesProfileMetadata[];
+  activeProfileId?: string;
+  activeProfileSource?: HermesDataSource;
+  source: HermesDataSource;
+  message: string;
+  executionRouting?: 'supported' | 'unsupported' | 'unknown';
+  executionRoutingReason?: string;
+  executionRoutingSource?: HermesDataSource;
+  executionRoutingMode?: 'request' | 'session' | 'cli' | 'sidecar' | 'unavailable';
+}
+
+export interface HermesProfileClient {
+  listProfiles(): Promise<HermesProfileListResult>;
 }
 
 export interface HermesBridgeApi {

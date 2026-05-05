@@ -1,167 +1,131 @@
 <goal>
-Implement the Hermes Guild hybrid bridge architecture: keep Gateway REST `/v1/runs` as the default v0 message execution path, add version-aware local read-only Hermes state adapters for operational/profile data, keep dashboard REST as optional token-gated compatibility only, and add a narrow Python sidecar only if Gateway REST is proven insufficient for core Pet/Guild message UX.
+Make Hermes Guild profile-context routed chat work end to end. Selecting a Hermes profile in Pet or Guild context must bind new chat/task execution to that profile, route through the best verified source in precedence order, and surface the real route used without modifying Hermes source code or relying on a separately started Hermes dashboard service.
 </goal>
 
 <context>
 Read these files first:
 - `AGENTS.md`
-- `README.md`
 - `SPEC.md`
-- `docs/DESIGN.md`
-- `docs/REFERENCES.md`
 - `docs/API_CONTRACT.md`
-- `docs/HERMES_INTEGRATION_PLAN.md`
 - `docs/HERMES_CAPABILITY_MATRIX.md`
+- `docs/HERMES_INTEGRATION_PLAN.md`
 - `docs/EXECUTION_LOG.md`
 - `src/types.ts`
 - `src/bridge/types.ts`
 - `src/bridge/hermesApiClient.ts`
 - `src/bridge/hermesApiClient.test.ts`
-- `src/bridge/hermesDashboardApiClient.ts`
-- `src/bridge/hermesDashboardApiClient.test.ts`
+- `src/bridge/hermesProfileClient.ts`
+- `src/bridge/hermesProfileClient.test.ts`
+- `src/bridge/hermesSidecarClient.ts`
+- `src/bridge/hermesSidecarClient.test.ts`
+- `src/bridge/realHermesBridge.ts`
 - `src/bridge/bridgeFactory.ts`
 - `src/bridge/bridgeFactory.test.ts`
-- `src/bridge/realHermesBridge.ts`
-- `src/bridge/mockHermesBridge.ts`
-- `src/bridge/mockHermesBridge.test.ts`
-- `src/hooks/useBridgeSnapshot.ts`
 - `src/App.tsx`
 - `src/App.pet.test.ts`
+- `sidecar/hermes_guild_sidecar.py`
+- `sidecar/tests/`
 - `src-tauri/src/lib.rs`
-- `src-tauri/src/main.rs`
-- `package.json`
 
-Reference code to inspect before local adapter work:
-- `../hermes-webui/api/routes.py`
-- `../hermes-webui/api/streaming.py`
-- `../hermes-webui/api/profiles.py`
-- `../hermes-webui/api/dashboard_probe.py`
-- `../hermes-webui/api/models.py`
-- `../hermes-webui/api/agent_sessions.py`
-- official Hermes `hermes_cli/web_server.py`
-- official Hermes API server docs
+Read-only Hermes references. Do not edit these files:
+- `/Users/plutoless/.hermes/hermes-agent/gateway/platforms/api_server.py`
+- `/Users/plutoless/Documents/hermes-webui/api/routes.py`
+- `/Users/plutoless/Documents/hermes-webui/api/streaming.py`
+- `/Users/plutoless/Documents/hermes-webui/api/profiles.py`
+- `/Users/plutoless/Documents/hermes-webui/server.py`
 
-Important prior findings:
-- `../hermes-webui` uses its own backend and reads local Hermes state for profiles, sessions, logs, config, cron, and related surfaces.
-- `../hermes-webui` sends normal chat through `POST /api/chat/start`, then streams via WebUI SSE, and the backend runs Hermes Agent in-process with `AIAgent.run_conversation()`.
-- `../hermes-webui` does not depend on protected official dashboard REST for normal chat or operational state.
-- Official `hermes dashboard` protects most `/api/*` routes with an ephemeral `X-Hermes-Session-Token`.
-- Hermes Guild should not require `hermes dashboard` and should not use CLI subprocesses for normal message sending.
-
-Discovery commands:
+Useful discovery commands:
 ```bash
 git status --short
-rg "runTask|/v1/runs|stopRun|getRun|HermesApiClient|RealHermesBridge" src
-rg "dashboard-compatibility|local-hermes-state|dataSources|SystemStatus|BridgeConfig" src docs
-rg "state.db|sessions.json|active_profile|cron|logs|config.yaml|\\.env|skills|toolsets" docs src
-rg "AIAgent|run_conversation|/api/chat/start|EventSource|dashboard_probe|get_active_hermes_home" ../hermes-webui/api ../hermes-webui/static
+git -C /Users/plutoless/.hermes/hermes-agent status --short
+rg "runTask|HermesApiRunTaskInput|ProfileContext|profileRouting|executionRouting|/v1/runs|capabilities|profiles|sidecar|Pet quick chat" src sidecar docs
+curl -s --max-time 2 http://127.0.0.1:8642/health
+curl -s --max-time 2 http://127.0.0.1:8642/v1/profiles
+curl -s --max-time 2 http://127.0.0.1:8642/v1/profile/active
+curl -s --max-time 2 http://127.0.0.1:8642/v1/capabilities
+hermes --help
+hermes profile --help
+hermes profile list
 ```
 </context>
 
 <constraints>
-- Preserve Hermes Guild's v0 loop: Pet entry -> profile assignment -> quest execution -> timeline visibility -> report card review.
-- Gateway REST `/v1/runs` remains the default v0 message sending path unless concrete evidence shows it cannot support core UX.
-- Do not require users to run `hermes dashboard`.
-- Do not call protected dashboard endpoints without an explicit valid token.
-- Do not store, log, or render dashboard tokens.
-- Do not use CLI subprocesses for normal Pet Mode or Quest Board message sending.
-- Use source precedence per capability:
-  1. Gateway REST
-  2. local Hermes state adapter
-  3. Python sidecar adapter only when Gateway REST is insufficient
-  4. Hermes CLI only for proven CLI-only capabilities
-  5. dashboard compatibility only as optional/debug fallback
-  6. Guild-owned workflow state
-  7. explicit unavailable state
-- Keep UI components bound to stable Guild bridge objects, not raw Hermes internals or raw sidecar payloads.
-- Keep adapters thin and version-aware; do not copy large Hermes internals into the React app.
-- Real mode must not silently show mock data for missing real sources.
-- Auto mode may use mock fallback only with visible source labels.
-- Never expose cleartext secrets.
-- Write actions for config/env/skills/cron/jobs require explicit user actions and tests.
-- Do not add Tavern/Handoff, standalone Skill Deck, full Infirmary, XP/loot/levels, multi-pet, or multi-agent orchestration.
-- Preserve unrelated user changes and untracked files, including any pre-existing `docs/superpowers/` directory.
+- Never edit, patch, monkey-patch, vendor, or write tests into Hermes source from this project.
+- Do not require users to start `hermes dashboard` or another standalone dashboard service for normal Guild execution.
+- Do not use protected dashboard APIs as the normal message execution route.
+- Use source precedence for real signals and execution: public official REST > stable official CLI > safe read-only local Hermes state > Hermes Guild Python sidecar > Guild-owned workflow state > unavailable.
+- Mock is test-only and must not be a runtime fallback.
+- Do not use `hermes profile use` or any global active-profile mutation for per-task or per-session routing.
+- Do not send unsupported `profile`, `profile_id`, `profile_name`, or `X-Hermes-Profile` data to `/v1/runs`.
+- Public REST selected-profile fields may be sent only after gateway health/capability/profile metadata proves routing support.
+- CLI execution may be used only when a stable official per-command profile mechanism is discovered and it does not mutate global active state.
+- Local state may provide metadata/evidence; it must not be used to fake execution routing.
+- Python sidecar execution may be used only when it can call a verified official CLI/import mechanism without editing Hermes source, is loopback-only, and returns structured route evidence.
+- Profile selection affects new messages/tasks only; do not rewrite existing task/session profile history after profile switches.
+- Pet chat bubbles must show only user text, actual Hermes returned output/progress text, and concise errors. Do not reintroduce greeting, sending, accepted, report-ready, `Quest accepted`, or `Returned output:` wrapper text.
+- Preserve unrelated dirty and untracked files.
+- Do not broaden scope into profile creation/editing, multi-pet, multi-agent orchestration, Tavern, Skill Deck, Infirmary, or decorative RPG stats.
 </constraints>
 
 <done_when>
-- `SPEC.md` and `GOAL.md` encode the hybrid bridge strategy: Gateway REST execution first, local read-only adapters second, optional version-aware sidecar only if needed, CLI fallback only for CLI-only features, dashboard compatibility optional only.
-- `docs/HERMES_CAPABILITY_MATRIX.md` maps every current Guild data surface to Gateway REST, local Hermes state, Python sidecar, CLI, dashboard compatibility, Guild-owned, mock fallback, or unavailable.
-- The capability matrix documents `../hermes-webui` source findings for message sending, profile resolution, sessions, logs, config/env, cron, dashboard probing, and state-db/session-file handling.
-- Gateway REST remains the default message sending path and tests cover run creation, events, run status, stop, raw Pet output, and review-card generation.
-- A local Hermes capability detector exists and reports Hermes version when available, Gateway endpoint availability, local file/database availability, schema status, Python module availability, and per-surface unavailable reasons.
-- Local read-only adapters implement or explicitly mark unavailable with detected reasons for: active profile identity, sessions summary, session messages summary if safely available, log tail summary, config summary, env redacted summary, cron summary, skills, and toolsets.
-- Local adapters bound reads by size/count and never expose cleartext secrets.
-- Real mode uses local adapter data for implemented surfaces and shows explicit unavailable states for missing or schema-incompatible surfaces.
-- Dashboard compatibility remains optional; protected calls are token-gated and never required for core task execution or operational state.
-- CLI adapter is not used for normal Pet or Quest Board message sending.
-- If a Python sidecar is implemented, it exposes a narrow versioned API, has startup/failure handling, contract tests, and no UI dependency on raw Hermes internals.
-- If a Python sidecar is deferred, docs record the concrete Gateway REST gaps that would justify it later and tests prove Gateway REST still supports the v0 loop.
-- `docs/API_CONTRACT.md` distinguishes Gateway REST, local Hermes state, Python sidecar, CLI, dashboard compatibility, Guild-owned, mock fallback, and unavailable data sources.
-- `docs/HERMES_INTEGRATION_PLAN.md` describes the hybrid architecture, update-safety strategy, and why dashboard/CLI are not primary message paths.
-- `docs/EXECUTION_LOG.md` records implementation evidence, `../hermes-webui` findings, local Hermes probes, validation results, and remaining gaps.
-- Unit tests cover version/capability detection, schema mismatch handling, local adapter parsing, source precedence, real-vs-mock labels, dashboard token gating, no-secret leakage, and Gateway REST message execution.
+- `SPEC.md` and `GOAL.md` define profile-context routed chat as the active goal and state that Hermes source code must not be modified.
+- Hermes source checkout status is checked and remains unmodified by this work.
+- Pet/Guild profile selection creates or updates a real `ProfileContext` for new chat/task execution, including profile id/name, profile identity source, route source/mode, session id when applicable, verification status, and unavailable reason when applicable.
+- Pet messages and Quest Board tasks both pass selected profile context into bridge execution.
+- Switching the active profile affects only new work; existing tasks, reports, timeline entries, and session records preserve their original selected profile context.
+- Public REST `/v1/runs` sends selected profile context only when capability metadata proves request/session profile routing support.
+- Unsupported public REST gateways receive no unsupported profile fields or profile headers.
+- CLI route discovery is implemented and tested or rejected with exact probe evidence from official `hermes` command help/output.
+- Local-state route usage is implemented only for safe read-only metadata/evidence, or explicitly rejected for execution with exact evidence.
+- Python sidecar selected-profile run support is implemented and tested when a verified official route exists; otherwise sidecar run endpoints return structured unsupported responses with the exact blocker.
+- Routed chat works end to end through the best verified source available on the installed Hermes, or the UI shows a precise `profile routing unavailable` state after REST, CLI, local-state, and sidecar routes have been checked.
+- Task timeline, report card, Integration Truth/System Status, and relevant docs show selected profile, actual route source/mode, Hermes run id when present, and unavailable reason when relevant.
+- Pet chat displays no app-authored lifecycle wrapper text and shows raw Hermes output/progress/error only.
+- `docs/API_CONTRACT.md`, `docs/HERMES_CAPABILITY_MATRIX.md`, `docs/HERMES_INTEGRATION_PLAN.md`, and `docs/EXECUTION_LOG.md` are updated with the final route behavior, source evidence, and remaining gaps.
+- `bun test src/bridge/hermesApiClient.test.ts` passes.
+- `bun test src/bridge/bridgeFactory.test.ts` passes.
+- `bun test src/bridge/hermesProfileClient.test.ts` passes.
+- `bun test src/bridge/hermesSidecarClient.test.ts` passes.
+- `bun test src/App.pet.test.ts` passes.
+- `python3 -m unittest discover sidecar/tests` passes.
 - `bun run verify:web` passes.
-- `cd src-tauri && cargo fmt --check` passes.
-- `cd src-tauri && cargo check` passes, or exact native blockers are documented in `docs/EXECUTION_LOG.md`.
+- `cd src-tauri && cargo fmt --check` passes if native code changes.
+- `cd src-tauri && cargo check` passes if native code changes.
 </done_when>
 
 <workflow>
-1. Check `git status --short` and identify unrelated or pre-existing untracked changes to preserve.
-2. Read all context files and compare the current partial implementation against `SPEC.md`.
-3. Inspect `../hermes-webui` source before implementation:
-   - `/api/chat/start` and SSE message flow
-   - `api/streaming.py` `AIAgent.run_conversation()` usage
-   - `api/profiles.py` profile/HERMES_HOME handling
-   - sessions/state-db helpers
-   - log tail handling
-   - cron profile context
-   - dashboard probe safety rules
-4. Update `docs/HERMES_CAPABILITY_MATRIX.md` before broad implementation. Add columns or notes for version/capability detection, local source path, schema check, and fallback behavior.
-5. Add failing tests for source precedence and update safety:
-   - Gateway REST remains default message path.
-   - CLI is not used for normal message sending.
-   - dashboard protected endpoints are skipped without token.
-   - local adapter marks schema mismatch unavailable.
-   - real mode does not show mock data for missing local surfaces.
-6. Implement a `HermesCapabilityDetector` or equivalent bridge utility that reports endpoint availability, local file availability, schema compatibility, Python module availability, and Hermes version when available.
-7. Implement local read-only adapters in small vertical slices:
-   - active profile identity
-   - sessions summary
-   - session messages summary when safely available
-   - log tail summary
-   - config summary
-   - env redacted summary
-   - cron summary
-   - skills/toolsets or explicit unavailable reasons
-8. For each local adapter slice, add fixtures for available, missing, malformed, and newer/older schema cases.
-9. Map adapter output into existing Guild-facing `SystemStatus`, `Agent`, `Skill`, `Task`, timeline, and report objects without exposing raw Hermes internals.
-10. Keep Gateway REST execution through `/v1/runs`, run events, run status, and stop working throughout.
-11. Evaluate whether Gateway REST blocks core Pet/Guild message UX. If no blocker exists, explicitly defer Python sidecar in docs. If a blocker exists, implement the smallest versioned sidecar API needed for that blocker.
-12. Keep dashboard compatibility optional and advanced. Do not call protected compatibility endpoints unless token access is explicit.
-13. Update UI only as needed for source labels, unavailable reasons, and capability status. Avoid visual redesign.
-14. Run focused tests after each adapter slice.
-15. Run `bun run verify:web`.
-16. Run native formatting/checks.
-17. Manually probe local Hermes Gateway and local state files where available.
-18. Update docs and execution log with evidence and exact remaining gaps.
-19. Audit every `done_when` item before final response.
+1. Check `git status --short` and identify unrelated work to preserve.
+2. Check Hermes source status with `git -C /Users/plutoless/.hermes/hermes-agent status --short`; do not edit that checkout.
+3. Read the spec, API contract, capability matrix, integration plan, execution log, bridge types, bridge clients, app code, sidecar code, and tests.
+4. Probe installed Hermes public REST health/profile/capability endpoints and record exact results.
+5. Inspect Hermes WebUI and Hermes gateway code as read-only references for session/profile-context behavior.
+6. Inspect official Hermes CLI help/output for selected-profile execution mechanisms. Record exact evidence before implementing any CLI route.
+7. Design the smallest `ProfileContext` and route-resolution changes that fit existing bridge/domain patterns.
+8. Add or update focused failing tests for profile context propagation, route precedence, unsupported REST omission, profile switching history preservation, sidecar/CLI behavior, and Pet chat wrapper regressions.
+9. Implement route resolution in the bridge: public REST first, then verified CLI/local-state/sidecar mechanisms, then explicit unavailable.
+10. If a verified CLI route exists, implement it with bounded argument handling and no shell interpolation.
+11. If sidecar execution is needed and verifiable, implement loopback-only sidecar run endpoints and TypeScript client support; otherwise keep structured unsupported responses.
+12. Wire Pet and Quest Board chat/task submission through the same profile-context route.
+13. Update task timeline/report/system status UI so it reports actual route evidence without polluting Pet chat bubbles.
+14. Update docs and execution log with probes, route decisions, and any remaining unavailable gaps.
+15. Run focused tests, fix failures, then run broad web and native checks required by the changed files.
+16. Audit every `done_when` item before final response.
 </workflow>
 
 <verification_loop>
-Focused existing checks:
+Focused web checks:
 ```bash
 bun test src/bridge/hermesApiClient.test.ts
-bun test src/bridge/hermesDashboardApiClient.test.ts
 bun test src/bridge/bridgeFactory.test.ts
-bun test src/bridge/mockHermesBridge.test.ts
+bun test src/bridge/hermesProfileClient.test.ts
+bun test src/bridge/hermesSidecarClient.test.ts
 bun test src/App.pet.test.ts
 ```
 
-Focused new checks to add as files exist:
+Sidecar checks:
 ```bash
-bun test src/bridge/hermesCapabilityDetector.test.ts
-bun test src/bridge/hermesLocalStateAdapter.test.ts
-bun test src/bridge/hermesSidecarAdapter.test.ts
+python3 -m unittest discover sidecar/tests
+python3 sidecar/hermes_guild_sidecar.py --self-test
 ```
 
 Full web validation:
@@ -169,58 +133,56 @@ Full web validation:
 bun run verify:web
 ```
 
-Native validation:
+Native validation, required if `src-tauri` changes:
 ```bash
 cd src-tauri && cargo fmt --check
 cd src-tauri && cargo check
 ```
 
-Manual probes:
+Manual/probe checks:
 ```bash
-curl -s http://127.0.0.1:8642/health
-curl -s http://127.0.0.1:8642/v1/models
-curl -s http://127.0.0.1:8642/v1/capabilities
+git -C /Users/plutoless/.hermes/hermes-agent status --short
+curl -s --max-time 2 http://127.0.0.1:8642/health
+curl -s --max-time 2 http://127.0.0.1:8642/v1/profiles
+curl -s --max-time 2 http://127.0.0.1:8642/v1/profile/active
+curl -s --max-time 2 http://127.0.0.1:8642/v1/capabilities
+hermes --help
+hermes profile --help
+hermes profile list
 ```
 
-Manual app checks:
-- Open Hermes Guild in real mode without `hermes dashboard`.
-- Send a Pet message and confirm it uses Gateway REST and produces a reviewable report.
-- Confirm stop-task behavior uses Gateway REST when run id is known.
-- Confirm profile/session/log/config/env/cron/skills/toolsets surfaces show local real data or explicit unavailable reasons.
-- Confirm no cleartext secrets are displayed.
-- Confirm no protected dashboard calls occur without explicit token access.
-- Confirm CLI is not used for normal message sending.
-
-If local Hermes files, Gateway endpoints, Python modules, or native checks are unavailable, document exact commands, errors, and skipped scope in `docs/EXECUTION_LOG.md`.
+Manual UI check when a dev server is available:
+- Open `/?mode=pet&variant=skyship-command-deck&pet=expanded`.
+- Confirm input is empty and focused.
+- Select a real non-default Hermes profile if available.
+- Send a Pet message.
+- Confirm the new task/report records the selected profile, route source/mode, and Hermes run id when present.
+- Confirm Pet chat shows only user text and raw Hermes output/progress/error.
+- Confirm no `Quest accepted`, `Returned output:`, greeting, report-ready, or fake route text appears in chat bubbles.
+- Confirm switching the profile and sending another message does not rewrite the first task's profile context.
 </verification_loop>
 
 <execution_rules>
 - Check git status before edits.
 - Preserve unrelated user changes.
 - Prefer `rg` over `grep` when available.
-- Use the runtime's patch/edit tool for manual edits when available.
+- Use `apply_patch` for manual code/doc edits.
 - Read context files before implementation.
 - Batch independent file reads in parallel when the runtime supports it.
-- Use primary sources for Hermes behavior: official docs, `NousResearch/hermes-agent` source, and `../hermes-webui` source.
-- Write failing tests before implementation for behavior changes.
 - Run focused tests before broad tests.
 - Do not paper over failures.
 - Do not widen scope.
 - Keep the final answer concise.
+- Do not edit files outside this repo unless the user explicitly asks for that exact file change.
+- Treat `/Users/plutoless/.hermes/hermes-agent` and `/Users/plutoless/Documents/hermes-webui` as read-only references.
 </execution_rules>
 
 <output_contract>
 Final response should include:
-- files changed
-- hybrid bridge architecture summary
-- message sending path evidence
-- local adapter surfaces implemented or unavailable with reasons
-- capability detector summary
-- sidecar implemented/deferred decision and evidence
-- focused and full validation command results
-- native validation results or documented blockers
-- manual Hermes probe results or blockers
-- remaining Hermes API/local-state/sidecar/CLI gaps
-
-The task is complete only after every `done_when` item has evidence or an exact documented blocker.
+- Hermes source was not modified, or any accidental Hermes edits were reverted
+- Hermes Guild files changed
+- verified route source used for selected-profile chat, or exact reason routing remains unavailable
+- profile context behavior implemented for Pet and Quest Board
+- verification commands and results
+- remaining gaps, especially any missing Hermes public REST/CLI capability
 </output_contract>

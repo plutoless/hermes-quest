@@ -80,16 +80,16 @@ Hermes Guild now has three bridge modes:
 
 - `mock`: keeps the local MockHermesBridge loop.
 - `real`: uses the Hermes API server.
-- `auto`: tries real Hermes first and falls back to mock when Hermes is unavailable.
+- `auto`: tries real Hermes first and should surface unavailable/error when Hermes is unavailable. Mock is test/dev-harness only, not a normal runtime fallback.
 
 The default mode is `auto`. The production Guild Hall keeps bridge truth compact: a titlebar status chip plus a small Integration Truth strip. Bridge configuration is tucked behind the titlebar status details instead of appearing as an always-visible Apply-style control. The visible truth data includes:
 
 - selected mode: `mock`, `real`, or `auto`
 - active implementation: `mock`, `real`, or `loading`
 - Hermes availability: `available`, `unavailable`, or `unchecked`
-- fallback reason, only when auto mode falls back
+- unavailable/error reason when a real Hermes source is missing
 - profile data source: Guild-defined roles
-- execution source: mock bridge, mock fallback, bridge loading, or Real Hermes API
+- execution source: bridge loading, Real Hermes API, explicit test/dev mock harness, or unavailable
 
 Changing the mode in bridge status details and pressing `Save` writes bridge config to browser/Tauri local storage under `hermes-guild.bridge-config` and rebuilds the active bridge. You can also seed the same config in dev tools:
 
@@ -100,7 +100,7 @@ localStorage.setItem('hermes-guild.bridge-config', JSON.stringify({
 }))
 ```
 
-Use `bridgeMode: 'mock'` to force the mock bridge. Use `bridgeMode: 'real'` to fail visibly instead of falling back when Hermes cannot run. Only `auto` mode may fall back to mock.
+Use `bridgeMode: 'mock'` only for tests, fixtures, and explicit development harnesses. Use `bridgeMode: 'real'` to fail visibly when Hermes cannot run. Auto mode should not silently substitute mock data.
 
 Real mode calls:
 
@@ -129,19 +129,19 @@ Use `docs/NATIVE_VERIFICATION.md` for the native pass/fail checklist after those
 - Reusable Pixel UI Kit layer for the main Guild Hall surface: pixel app window, asset-framed panels, buttons, inputs, badges, avatar, quest card, log list, review card, truth strip, and command bar.
 - Low-density pixel JRPG visual treatment: one cohesive desktop app window, one focused Guild Hall active companion, one active quest, compact quest report/review panel, Quest Board entry, quest log timeline, mission-result report card, and Review Chamber.
 - 8 reviewable JRPG visual variants selectable in-app or by URL.
-- In mock mode, profile switcher for mock profiles Lyra / Researcher, Brass / Builder, and Sable / Reviewer.
+- In explicit test/dev mock harnesses, profile switcher for mock profiles Lyra / Researcher, Brass / Builder, and Sable / Reviewer.
 - In real mode, profile switcher for Hermes-mapped Guild roles: Hermes Researcher, Hermes Builder, and Hermes Reviewer.
 - Pet task input creates a quest through the selected bridge and assigns it to the active profile.
 - Guild Hall shows one active companion, one active quest, a compact returned-report panel with approve/revise actions, recent quest log highlights, visible integration truth, and a bottom command input.
 - The empty active quest state includes suggested prompt chips that fill the command input without creating a task until Send is pressed.
 - Character cards show role/class, current state, current quest, traits, equipment, and a truth label that Guild roles do not imply live Hermes profile routing.
 - Quest Board shows direct task creation, optional advanced brief fields, task list, detail, artifacts, blocked/error states, and quest log timeline.
-- Mock lifecycle events drive thinking/running/needs-review states.
+- Mock lifecycle events drive thinking/running/needs-review states only in explicit test/dev harnesses.
 - Review shows Quest Report Cards with artifacts, facts, assumptions, known gaps, review items, approve/revise actions, and real-vs-mock output provenance.
 - Approve marks a report approved.
-- Revise creates a new mock execution pass for the same profile.
+- Revise creates a new execution pass for the same profile.
 - Mock blocked/error lifecycle methods remain in the bridge and tests; production-visible debug buttons are not shown on the default Guild Hall.
-- Auto bridge mode falls back to mock when native Hermes is not available.
+- Auto bridge mode should surface unavailable/error when native Hermes is not available.
 - Real bridge mode can run Hermes API tasks when the Hermes API server is available.
 
 ## Pixel UI Review

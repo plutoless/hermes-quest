@@ -316,11 +316,11 @@ Examples:
 ```text
 Real
 Auto
-Mock fallback
 Needs attention
 ```
 
 Do not show full diagnostics. If bridge state matters, clicking the status should open the main window diagnostics/details.
+Do not show mock as a normal runtime fallback; unavailable Hermes state should read as needs attention, unavailable, or error.
 
 ## Behavior Requirements
 
@@ -425,7 +425,7 @@ This pass is successful when:
 - avatar identity is unchanged
 - avatar placement is centered and consistent
 - current main app UI is not broadly redesigned
-- RealHermes bridge, mock/real/auto modes, submit, approve/revise flow still work
+- RealHermes bridge, real/auto behavior, explicit test/dev mock harnesses, submit, approve/revise flow still work
 - EXECUTION_LOG is updated with changes and validation results
 
 ## Final Instruction
