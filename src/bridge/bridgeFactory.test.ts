@@ -15,6 +15,10 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 const defaultConfig: BridgeConfig = {
   bridgeMode: 'auto',
   hermesApiBaseUrl: 'http://127.0.0.1:8642',
+  hermesConnectionTarget: 'local',
+  localHermesApiBaseUrl: 'http://127.0.0.1:8642',
+  managedHermesApiBaseUrl: '',
+  managedHermesBearerToken: '',
   hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
   hermesSidecarBaseUrl: 'http://127.0.0.1:8765',
 };
@@ -42,6 +46,10 @@ function legacyConfigWithManualProfileName(name: string): BridgeConfig & { realP
   return {
     bridgeMode: 'real',
     hermesApiBaseUrl: 'http://127.0.0.1:8642',
+    hermesConnectionTarget: 'local',
+    localHermesApiBaseUrl: 'http://127.0.0.1:8642',
+    managedHermesApiBaseUrl: '',
+    managedHermesBearerToken: '',
     hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
     hermesSidecarBaseUrl: 'http://127.0.0.1:8765',
     realProfileName: name,
@@ -89,7 +97,7 @@ function sidecarClient(
       ok: status.ok,
       status: status.ok ? 200 : 503,
       data: {
-        source_precedence: ['public-rest', 'cli', 'local-state', 'sidecar', 'guild-owned', 'unavailable'],
+        source_precedence: ['public-rest', 'cli', 'local-state', 'sidecar', 'companion-owned', 'unavailable'],
       },
     }),
     getLocalStateSummary: async () => ({
@@ -150,6 +158,10 @@ describe('bridgeFactory', () => {
     saveBridgeConfig({
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:9999',
+      hermesConnectionTarget: 'local',
+      localHermesApiBaseUrl: 'http://127.0.0.1:9999',
+      managedHermesApiBaseUrl: '',
+      managedHermesBearerToken: '',
       hermesDashboardBaseUrl: 'http://127.0.0.1:9229',
       hermesSidecarBaseUrl: 'http://127.0.0.1:8877',
     });
@@ -157,6 +169,10 @@ describe('bridgeFactory', () => {
     expect(loadBridgeConfig()).toEqual({
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:9999',
+      hermesConnectionTarget: 'local',
+      localHermesApiBaseUrl: 'http://127.0.0.1:9999',
+      managedHermesApiBaseUrl: '',
+      managedHermesBearerToken: '',
       hermesDashboardBaseUrl: 'http://127.0.0.1:9229',
       hermesSidecarBaseUrl: 'http://127.0.0.1:8877',
     });
@@ -164,7 +180,7 @@ describe('bridgeFactory', () => {
 
   test('bridge config discards manual real profile display name', () => {
     localStorage.setItem(
-      'hermes-guild.bridge-config',
+      'hermes-companion.bridge-config',
       JSON.stringify({
         bridgeMode: 'real',
         hermesApiBaseUrl: 'http://127.0.0.1:8642/',
@@ -175,8 +191,29 @@ describe('bridgeFactory', () => {
     expect(loadBridgeConfig()).toEqual({
       bridgeMode: 'real',
       hermesApiBaseUrl: 'http://127.0.0.1:8642',
+      hermesConnectionTarget: 'local',
+      localHermesApiBaseUrl: 'http://127.0.0.1:8642',
+      managedHermesApiBaseUrl: '',
+      managedHermesBearerToken: '',
       hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
       hermesSidecarBaseUrl: 'http://127.0.0.1:8765',
+    });
+  });
+
+  test('bridge config migrates legacy Hermes API base URL into the local target URL', () => {
+    localStorage.setItem(
+      'hermes-companion.bridge-config',
+      JSON.stringify({
+        bridgeMode: 'real',
+        hermesApiBaseUrl: 'http://127.0.0.1:9999/',
+      }),
+    );
+
+    expect(loadBridgeConfig()).toEqual({
+      ...defaultConfig,
+      bridgeMode: 'real',
+      hermesApiBaseUrl: 'http://127.0.0.1:9999',
+      localHermesApiBaseUrl: 'http://127.0.0.1:9999',
     });
   });
 
@@ -184,11 +221,34 @@ describe('bridgeFactory', () => {
     saveBridgeConfig({
       bridgeMode: 'auto',
       hermesApiBaseUrl: ' http://127.0.0.1:8642/ ',
+      hermesConnectionTarget: 'local',
+      localHermesApiBaseUrl: ' http://127.0.0.1:8642/ ',
+      managedHermesApiBaseUrl: '',
+      managedHermesBearerToken: '',
       hermesDashboardBaseUrl: ' http://127.0.0.1:9119/ ',
       hermesSidecarBaseUrl: ' http://127.0.0.1:8765/ ',
     });
 
     expect(loadBridgeConfig()).toEqual(defaultConfig);
+  });
+
+  test('managed target uses configured managed URL as effective Hermes API base URL', () => {
+    saveBridgeConfig({
+      ...defaultConfig,
+      bridgeMode: 'real',
+      hermesConnectionTarget: 'managed',
+      managedHermesApiBaseUrl: ' https://managed.example.com/hermes/ ',
+      managedHermesBearerToken: 'token-123',
+    });
+
+    expect(loadBridgeConfig()).toEqual({
+      ...defaultConfig,
+      bridgeMode: 'real',
+      hermesConnectionTarget: 'managed',
+      hermesApiBaseUrl: 'https://managed.example.com/hermes',
+      managedHermesApiBaseUrl: 'https://managed.example.com/hermes',
+      managedHermesBearerToken: 'token-123',
+    });
   });
 
   test('creates mock bridge directly in mock mode', async () => {
@@ -202,6 +262,34 @@ describe('bridgeFactory', () => {
     expect(status.sidecarAvailable).toBe('unchecked');
     expect(status.logsSummary).toContain('Mock Hermes Bridge');
     expect(status.warnings.some((warning) => warning.includes('Bridge mode: mock'))).toBe(true);
+  });
+
+  test('managed target without token reports unavailable without calling Hermes API', async () => {
+    let healthCalls = 0;
+    const bridge = await createBridgeFromConfig(
+      {
+        ...defaultConfig,
+        bridgeMode: 'real',
+        hermesConnectionTarget: 'managed',
+        managedHermesApiBaseUrl: 'https://managed.example.com/hermes',
+        managedHermesBearerToken: '',
+      },
+      {
+        apiClient: {
+          checkHealth: async () => {
+            healthCalls += 1;
+            return { ok: true, message: 'should not be called' };
+          },
+          runTask: async () => ({ ok: true, output: '', events: [] }),
+        },
+      },
+    );
+
+    const status = bridge.getSnapshot().systemStatus;
+    expect(healthCalls).toBe(0);
+    expect(status.hermesAvailable).toBe('unavailable');
+    expect(status.hermesConnectionStatus).toBe('managed-missing-token');
+    expect(status.logsSummary).toContain('Managed Hermes token required');
   });
 
   test('auto mode surfaces unavailable real bridge when Hermes health fails', async () => {
@@ -556,11 +644,11 @@ describe('bridgeFactory', () => {
 
     const taskId = bridge.createTask({ brief: 'Use sidecar profile route.', assigneeId: 'frieren', type: 'pet' });
     await wait(20);
-    const questBoardTaskId = bridge.createTask({ brief: 'Use sidecar profile route from board.', assigneeId: 'frieren', type: 'quest_board' });
+    const companionChatTaskId = bridge.createTask({ brief: 'Use sidecar profile route from board.', assigneeId: 'frieren', type: 'companion_chat' });
     await wait(20);
     const snapshot = bridge.getSnapshot();
     const task = snapshot.tasks.find((item) => item.id === taskId);
-    const questBoardTask = snapshot.tasks.find((item) => item.id === questBoardTaskId);
+    const companionChatTask = snapshot.tasks.find((item) => item.id === companionChatTaskId);
 
     expect(gatewayRuns).toHaveLength(0);
     expect(sidecarRuns).toHaveLength(2);
@@ -577,8 +665,8 @@ describe('bridgeFactory', () => {
     });
     expect(task?.hermesRunId).toBe('sidecar-1');
     expect(task?.timeline.some((event) => event.message.includes('Profile context verified'))).toBe(true);
-    expect(questBoardTask?.type).toBe('quest_board');
-    expect(questBoardTask?.profileContext?.routingSource).toBe('sidecar');
+    expect(companionChatTask?.type).toBe('companion_chat');
+    expect(companionChatTask?.profileContext?.routingSource).toBe('sidecar');
   });
 
   test('real mode routes selected CLI profiles through native CLI when sidecar is unavailable', async () => {
@@ -1120,10 +1208,10 @@ describe('bridgeFactory', () => {
     expect(activeAgent?.id).toBe('profile-unavailable');
     expect(calls).toHaveLength(1);
     expect(calls[0].input).toContain('Write a real bridge smoke report.');
-    expect(calls[0].input).toContain('Hermes Guild Pet Mode message:');
-    expect(calls[0].input).not.toContain('Hermes Guild quest brief:');
+    expect(calls[0].input).toContain('Hermes Companion Pet Mode message:');
+    expect(calls[0].input).not.toContain('Hermes Companion message brief:');
     expect(calls[0].instructions).toContain('Pet Mode');
-    expect(calls[0].instructions).not.toContain('suitable for a Quest Report Card');
+    expect(calls[0].instructions).not.toContain('suitable for a companion response');
     expect(calls[0].sessionId).toBe(taskId);
     expect(task?.state).toBe('completed');
     expect(task?.reviewStatus).toBe('none');
@@ -1134,7 +1222,7 @@ describe('bridgeFactory', () => {
     expect(snapshot.systemStatus.hermesApiBaseUrl).toBe('http://127.0.0.1:8642');
   });
 
-  test('real mode keeps Quest Board tasks on the Quest Report Card contract', async () => {
+  test('real mode keeps Companion chat tasks on the Companion response contract', async () => {
     const calls: Array<{ input: string; instructions?: string; sessionId?: string }> = [];
     const apiClient: HermesApiClient = {
       checkHealth: async () => ({ ok: true, message: 'Hermes API healthy' }),
@@ -1142,8 +1230,8 @@ describe('bridgeFactory', () => {
         calls.push({ input, instructions, sessionId });
         return {
           ok: true,
-          output: 'Quest completed from Hermes API.',
-          events: [{ event: 'run.completed', output: 'Quest completed from Hermes API.' }],
+          output: 'Companion response from Hermes API.',
+          events: [{ event: 'run.completed', output: 'Companion response from Hermes API.' }],
         };
       },
     };
@@ -1153,16 +1241,16 @@ describe('bridgeFactory', () => {
       brief: 'Draft a release checklist.',
       goals: 'Cover test, build, and rollout checks.',
       assigneeId: bridge.getSnapshot().activeProfileId,
-      type: 'quest_board',
+      type: 'companion_chat',
     });
 
     await wait(20);
 
     expect(calls).toHaveLength(1);
-    expect(calls[0].input).toContain('Hermes Guild quest brief:');
+    expect(calls[0].input).toContain('Hermes Companion message brief:');
     expect(calls[0].input).toContain('Draft a release checklist.');
     expect(calls[0].input).toContain('Goals:\nCover test, build, and rollout checks.');
-    expect(calls[0].instructions).toContain('Quest Report Card');
+    expect(calls[0].instructions).toContain('Companion response');
     expect(calls[0].sessionId).toBe(taskId);
   });
 

@@ -27,8 +27,8 @@ const now = () => new Date().toISOString();
 let nextId = 1;
 const runtimeId = Math.random().toString(36).slice(2, 8);
 const id = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${runtimeId}-${nextId++}`;
-const bridgeStorageKey = 'hermes-guild.mock-bridge.snapshot';
-const bridgeChannelName = 'hermes-guild.mock-bridge';
+const bridgeStorageKey = 'hermes-companion.mock-bridge.snapshot';
+const bridgeChannelName = 'hermes-companion.mock-bridge';
 
 const makeEvent = (type: BridgeEventType, agentId?: string, taskId?: string, payload?: Record<string, unknown>): BridgeEvent => ({
   id: id('event'),
@@ -212,10 +212,10 @@ class MockHermesBridge {
     }
 
     const createdAt = now();
-    const taskId = id('quest');
+    const taskId = id('message');
     const title = this.titleFromBrief(input.brief);
-    const created = this.timeline(taskId, input.assigneeId, 'created', `Quest created from ${input.type === 'pet' ? 'Pet Mode' : 'Quest Board'}.`, 'guild');
-    const assigned = this.timeline(taskId, input.assigneeId, 'assigned', `Assigned directly to ${this.agentName(input.assigneeId)}.`, 'guild');
+    const created = this.timeline(taskId, input.assigneeId, 'created', `Message created from ${input.type === 'pet' ? 'Pet Mode' : 'Companion chat'}.`, 'companion');
+    const assigned = this.timeline(taskId, input.assigneeId, 'assigned', `Assigned directly to ${this.agentName(input.assigneeId)}.`, 'companion');
     const task: Task = {
       id: taskId,
       title,
@@ -252,7 +252,7 @@ class MockHermesBridge {
       progress: 100,
       timeline: [
         ...task.timeline,
-        this.timeline(report.taskId, report.agentId, 'approved', 'Quest Report Card approved by the user.', 'guild'),
+        this.timeline(report.taskId, report.agentId, 'approved', 'Companion response approved by the user.', 'companion'),
       ],
     });
     this.setAgentIdle(report.agentId);
@@ -269,7 +269,7 @@ class MockHermesBridge {
       reviewStatus: 'revision_requested',
       timeline: [
         ...original.timeline,
-        this.timeline(original.id, report.agentId, 'revision_requested', `Revision requested: ${instructions}`, 'guild'),
+        this.timeline(original.id, report.agentId, 'revision_requested', `Revision requested: ${instructions}`, 'companion'),
       ],
     });
     this.emit(makeEvent('revision_requested', report.agentId, original.id, { instructions }));
@@ -389,7 +389,7 @@ class MockHermesBridge {
         ...task.timeline,
         this.timeline(taskId, task.assigneeId, 'artifact', `Produced ${artifacts.length} review artifacts.`, 'bridge'),
         this.timeline(taskId, task.assigneeId, 'completed', 'Mock execution completed.', 'bridge'),
-        this.timeline(taskId, task.assigneeId, 'review_required', 'Quest Report Card is ready for review.', 'guild'),
+        this.timeline(taskId, task.assigneeId, 'review_required', 'Companion response is ready for review.', 'companion'),
       ],
     });
     this.snapshot.reports = [report, ...this.snapshot.reports.filter((item) => item.taskId !== taskId)];
@@ -433,8 +433,8 @@ class MockHermesBridge {
       id: id('report'),
       taskId: task.id,
       agentId: task.assigneeId,
-      title: `Quest Completed: ${task.title}`,
-      summary: `${this.agentName(task.assigneeId)} completed a mock pass on the quest brief and returned a reviewable deliverable.`,
+      title: `Companion Response: ${task.title}`,
+      summary: `${this.agentName(task.assigneeId)} completed a mock pass on the message brief and returned a reviewable deliverable.`,
       artifacts,
       facts: [
         'The task was directly assigned to the active profile.',
@@ -504,7 +504,7 @@ class MockHermesBridge {
   }
 
   private titleFromBrief(brief: string) {
-    const firstLine = brief.trim().split('\n')[0] || 'Untitled quest';
+    const firstLine = brief.trim().split('\n')[0] || 'Untitled message';
     return firstLine.length > 56 ? `${firstLine.slice(0, 53)}...` : firstLine;
   }
 

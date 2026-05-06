@@ -28,7 +28,7 @@ export class FetchHermesSidecarClient implements HermesSidecarClient {
       const text = await response.text();
       return sidecarStatusFromHttpResponse({ status: response.status, body: text }, this.baseUrl);
     } catch (error) {
-      return { ok: false, message: `Hermes Guild sidecar health request failed at ${this.baseUrl}: ${messageFromUnknown(error)}` };
+      return { ok: false, message: `Hermes Companion sidecar health request failed at ${this.baseUrl}: ${messageFromUnknown(error)}` };
     }
   }
 
@@ -63,7 +63,7 @@ export class FetchHermesSidecarClient implements HermesSidecarClient {
       const text = await response.text();
       return endpointResultFromHttpResponse({ status: response.status, body: text });
     } catch (error) {
-      return { ok: false, status: 0, error: `Hermes Guild sidecar request failed at ${this.baseUrl}${path}: ${messageFromUnknown(error)}` };
+      return { ok: false, status: 0, error: `Hermes Companion sidecar request failed at ${this.baseUrl}${path}: ${messageFromUnknown(error)}` };
     }
   }
 }
@@ -80,7 +80,7 @@ export class NativeHermesSidecarClient implements HermesSidecarClient {
       const response = await this.request('GET', `${this.baseUrl}/health`);
       return sidecarStatusFromHttpResponse(response, this.baseUrl);
     } catch (error) {
-      return { ok: false, message: `Hermes Guild sidecar health request failed at ${this.baseUrl}: ${messageFromUnknown(error)}` };
+      return { ok: false, message: `Hermes Companion sidecar health request failed at ${this.baseUrl}: ${messageFromUnknown(error)}` };
     }
   }
 
@@ -110,7 +110,7 @@ export class NativeHermesSidecarClient implements HermesSidecarClient {
       const response = await this.request(method, `${this.baseUrl}${path}`, body);
       return endpointResultFromHttpResponse(response);
     } catch (error) {
-      return { ok: false, status: 0, error: `Hermes Guild sidecar request failed at ${this.baseUrl}${path}: ${messageFromUnknown(error)}` };
+      return { ok: false, status: 0, error: `Hermes Companion sidecar request failed at ${this.baseUrl}${path}: ${messageFromUnknown(error)}` };
     }
   }
 
@@ -131,9 +131,9 @@ export async function createDefaultHermesSidecarClient(baseUrl: string): Promise
 function sidecarStatusFromHttpResponse(response: HermesSidecarHttpResponse, baseUrl: string): HermesSidecarStatus {
   const data = parseJson(response.body);
   if (response.status < 200 || response.status >= 300) {
-    return { ok: false, message: `Hermes Guild sidecar health returned HTTP ${response.status}.`, data };
+    return { ok: false, message: `Hermes Companion sidecar health returned HTTP ${response.status}.`, data };
   }
-  return { ok: true, message: `Hermes Guild sidecar available at ${baseUrl}`, data };
+  return { ok: true, message: `Hermes Companion sidecar available at ${baseUrl}`, data };
 }
 
 function parseJson(text: string) {
@@ -161,7 +161,7 @@ function runResultFromSidecarEndpoint(result: HermesEndpointResult<unknown>): He
     return {
       ok: false,
       output: stringField(data.output),
-      error: stringField(data.error) || result.error || stringField(data.reason) || `Hermes Guild sidecar run returned HTTP ${result.status}.`,
+      error: stringField(data.error) || result.error || stringField(data.reason) || `Hermes Companion sidecar run returned HTTP ${result.status}.`,
       runId,
       events,
     };

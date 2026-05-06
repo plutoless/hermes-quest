@@ -2,7 +2,7 @@ export type AgentStatus = 'idle' | 'thinking' | 'running' | 'blocked' | 'needs_r
 export type AgentAvailability = 'available' | 'busy' | 'offline';
 export type TaskState = 'created' | 'assigned' | 'running' | 'blocked' | 'completed' | 'needs_review' | 'approved' | 'error';
 export type ReviewStatus = 'none' | 'required' | 'approved' | 'revision_requested';
-export type TimelineSource = 'guild' | 'bridge' | 'hermes';
+export type TimelineSource = 'companion' | 'bridge' | 'hermes';
 
 export interface Skill {
   id: string;
@@ -133,7 +133,7 @@ export interface Task {
   nonGoals?: string;
   context?: string;
   definitionOfDone?: string;
-  type: 'pet' | 'quest_board';
+  type: 'pet' | 'companion_chat';
   state: TaskState;
   progress: number;
   artifacts: Artifact[];
@@ -171,7 +171,11 @@ export interface SystemStatus {
   activeImplementation: 'mock' | 'real' | 'loading';
   hermesAvailable: 'available' | 'unavailable' | 'unchecked';
   fallbackReason?: string;
+  hermesConnectionTarget?: 'local' | 'managed' | 'custom';
+  hermesConnectionStatus?: 'local' | 'managed-connected' | 'managed-missing-token' | 'managed-url-not-configured' | 'unavailable';
   hermesApiBaseUrl?: string;
+  localHermesApiBaseUrl?: string;
+  managedHermesApiBaseUrl?: string;
   hermesDashboardBaseUrl?: string;
   hermesSidecarBaseUrl?: string;
   logsSummary: string;
@@ -204,7 +208,7 @@ export type SystemDataSource =
   | 'local-hermes-state'
   | 'sidecar'
   | 'dashboard-compatibility'
-  | 'guild-owned'
+  | 'companion-owned'
   | 'mock-fallback'
   | 'unavailable'
   | 'cli-pty';
@@ -247,7 +251,7 @@ export interface BridgeEvent {
 export interface CreateTaskInput {
   brief: string;
   assigneeId: string;
-  type: 'pet' | 'quest_board';
+  type: 'pet' | 'companion_chat';
   goals?: string;
   nonGoals?: string;
   context?: string;

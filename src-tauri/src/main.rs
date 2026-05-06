@@ -1,3 +1,3 @@
 fn main() {
-    hermes_guild_lib::run()
+    hermes_companion_lib::run()
 }

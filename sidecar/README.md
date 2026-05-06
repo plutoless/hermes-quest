@@ -6,14 +6,17 @@ The preferred runtime path is the Hermes bridge used by the desktop companion. T
 
 ## Run
 
-Run the existing sidecar module with loopback host and port arguments when local compatibility probes are needed.
+```bash
+python3 sidecar/hermes_companion_sidecar.py --host 127.0.0.1 --port 8765
+```
 
 ## Self-Test
 
-The existing sidecar module includes a self-test entry point for local verification.
+```bash
+python3 sidecar/hermes_companion_sidecar.py --self-test
+```
 
 ## Notes
 
 - The service is intended for loopback use only.
 - Missing Hermes data should be reported as unavailable, not replaced with fake production data.
-- Existing Python module and class names are historical implementation details; this docs reset does not rename code symbols.

@@ -9,6 +9,7 @@ import {
   Gauge,
   Hand,
   Image as ImageIcon,
+  KeyRound,
   MapPin,
   MessageCircle,
   Moon,
@@ -18,6 +19,7 @@ import {
   Plus,
   Power,
   Send,
+  Server,
   Settings,
   Sparkles,
   Upload,
@@ -39,8 +41,8 @@ import type {
   CompanionAppearance,
   CompanionStatus,
 } from './types';
-import type { HermesBridgeApi } from './bridge/types';
-import type { BridgeMode } from './bridge/types';
+import type { BridgeConfig, HermesBridgeApi } from './bridge/types';
+import type { BridgeMode, HermesConnectionTarget } from './bridge/types';
 
 const companionStateStorageKey = 'hermes-desktop.companion-state.v0';
 const hermesCharacterUrl = new URL('./assets/hermes-character.png', import.meta.url).href;
@@ -240,14 +242,22 @@ export function getCompanionProviderMode(bridgeMode: BridgeMode, hermesAvailable
   return hermesAvailable === 'available' ? 'hermes' : 'mock';
 }
 
-function getProviderStatusCopy(bridgeMode: BridgeMode, providerMode: ProviderMode, bridgeUnavailable: boolean) {
+function getProviderStatusCopy(bridgeConfig: BridgeConfig, providerMode: ProviderMode, bridgeUnavailable: boolean) {
+  if (bridgeConfig.hermesConnectionTarget === 'managed' && !bridgeConfig.managedHermesApiBaseUrl) {
+    return 'Managed Hermes URL is not configured for this build.';
+  }
+  if (bridgeConfig.hermesConnectionTarget === 'managed' && !bridgeConfig.managedHermesBearerToken) {
+    return 'Managed Hermes token required before connecting.';
+  }
+  const target = bridgeConfig.hermesConnectionTarget === 'managed' ? 'Managed Hermes' : 'Local Hermes';
+  const bridgeMode = bridgeConfig.bridgeMode;
   if (bridgeMode === 'real') {
-    return bridgeUnavailable ? 'Hermes bridge unavailable. Real mode will not use mock output.' : 'Hermes bridge connected.';
+    return bridgeUnavailable ? `${target} unavailable. Real mode will not use mock output.` : `${target} connected.`;
   }
   if (bridgeMode === 'auto' && providerMode === 'mock') {
-    return 'Auto mode is using local mock because Hermes is unavailable.';
+    return `Auto mode is using local mock because ${target} is unavailable.`;
   }
-  return providerMode === 'mock' ? 'Mock mode is explicit.' : 'Hermes bridge connected.';
+  return providerMode === 'mock' ? 'Mock mode is explicit.' : `${target} connected.`;
 }
 
 function cloneCompanionState(state: CompanionRuntimeState): CompanionRuntimeState {
@@ -565,7 +575,7 @@ function statusToAnimation(status: CompanionStatus): AnimationState {
 function App() {
   const panelWindow = getPanelWindow();
   const routeCompanionId = getRouteCompanionId();
-  const { bridge, bridgeReady, bridgeConfig, snapshot } = useBridgeSnapshot();
+  const { bridge, bridgeReady, bridgeConfig, applyBridgeConfig, snapshot } = useBridgeSnapshot();
   const [runtime, setRuntime] = useState<CompanionRuntimeState>(() => loadCompanionState());
   const [draftMessage, setDraftMessage] = useState('');
   const [appearanceSource, setAppearanceSource] = useState<AppearanceSource>('preset');
@@ -839,9 +849,10 @@ function App() {
             open
             settings={runtime.settings}
             bridgeMode={providerMode}
-            bridgeConfigMode={bridgeConfig.bridgeMode}
+            bridgeConfig={bridgeConfig}
             bridgeUnavailable={bridgeUnavailable}
             onClose={() => void hidePanelWindow(panelWindow)}
+            onBridgeConfigChange={applyBridgeConfig}
             onChange={(patch) => updateRuntime((state) => {
               state.settings = { ...state.settings, ...patch };
               state.companions = state.companions.map((companion) => ({
@@ -1231,22 +1242,37 @@ function SettingsPopover({
   open,
   settings,
   bridgeMode,
-  bridgeConfigMode,
+  bridgeConfig,
   bridgeUnavailable,
   onClose,
+  onBridgeConfigChange,
   onChange,
 }: {
   open: boolean;
   settings: AppSettings;
   bridgeMode: ProviderMode;
-  bridgeConfigMode: BridgeMode;
+  bridgeConfig: BridgeConfig;
   bridgeUnavailable: boolean;
   onClose: () => void;
+  onBridgeConfigChange: (config: BridgeConfig) => void;
   onChange: (patch: Partial<AppSettings>) => void;
 }) {
+  const [managedTokenDraft, setManagedTokenDraft] = useState(bridgeConfig.managedHermesBearerToken);
+
+  useEffect(() => {
+    setManagedTokenDraft(bridgeConfig.managedHermesBearerToken);
+  }, [bridgeConfig.managedHermesBearerToken]);
+
   if (!open) return null;
   const BridgeIcon = bridgeUnavailable ? WifiOff : bridgeMode === 'mock' ? CircleAlert : Wifi;
   const bridgeStateClass = bridgeUnavailable ? 'unavailable' : bridgeMode === 'mock' ? 'mock' : 'connected';
+  const updateConnectionTarget = (target: HermesConnectionTarget) => {
+    if (target === 'custom') return;
+    onBridgeConfigChange({ ...bridgeConfig, hermesConnectionTarget: target });
+  };
+  const updateManagedToken = (managedHermesBearerToken: string) => {
+    onBridgeConfigChange({ ...bridgeConfig, managedHermesBearerToken });
+  };
 
   return (
     <section className="glass-popover settings-popover" aria-label="Settings">
@@ -1259,9 +1285,46 @@ function SettingsPopover({
       <SettingToggle icon={<Moon size={18} />} label="Quiet mode" checked={settings.quietMode} onChange={(value) => onChange({ quietMode: value })} />
       <SettingToggle icon={<MousePointer2 size={18} />} label="Click-through mode" checked={settings.clickThrough} onChange={(value) => onChange({ clickThrough: value })} />
       <SettingToggle icon={<Gauge size={18} />} label="Low resource mode" checked={settings.lowResourceMode} onChange={(value) => onChange({ lowResourceMode: value })} />
+      <div className="connection-settings" aria-label="Hermes connection">
+        <span className="setting-label"><Server size={18} />Hermes connection</span>
+        <div className="connection-targets" role="group" aria-label="Hermes connection target">
+          <button type="button" className={bridgeConfig.hermesConnectionTarget === 'local' ? 'active' : ''} onClick={() => updateConnectionTarget('local')}>Local</button>
+          <button type="button" className={bridgeConfig.hermesConnectionTarget === 'managed' ? 'active' : ''} onClick={() => updateConnectionTarget('managed')}>Managed</button>
+        </div>
+        <small>
+          {bridgeConfig.hermesConnectionTarget === 'managed'
+            ? bridgeConfig.managedHermesApiBaseUrl || 'Managed URL not configured'
+            : bridgeConfig.localHermesApiBaseUrl}
+        </small>
+        {bridgeConfig.hermesConnectionTarget === 'managed' ? (
+          <label className="token-row">
+            <span><KeyRound size={16} />Bearer token</span>
+            <input
+              type="password"
+              value={managedTokenDraft}
+              onChange={(event) => setManagedTokenDraft(event.target.value)}
+              placeholder="Required for Managed"
+              autoComplete="off"
+            />
+            <button
+              type="button"
+              onClick={() => updateManagedToken(managedTokenDraft)}
+              disabled={managedTokenDraft === bridgeConfig.managedHermesBearerToken}
+            >
+              Save
+            </button>
+            {managedTokenDraft || bridgeConfig.managedHermesBearerToken ? (
+              <button type="button" onClick={() => {
+                setManagedTokenDraft('');
+                updateManagedToken('');
+              }}>Clear</button>
+            ) : null}
+          </label>
+        ) : null}
+      </div>
       <div className={`bridge-state ${bridgeStateClass}`}>
         <BridgeIcon size={18} aria-hidden="true" />
-        <span>{getProviderStatusCopy(bridgeConfigMode, bridgeMode, bridgeUnavailable)}</span>
+        <span>{getProviderStatusCopy(bridgeConfig, bridgeMode, bridgeUnavailable)}</span>
       </div>
     </section>
   );

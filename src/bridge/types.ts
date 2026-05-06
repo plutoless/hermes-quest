@@ -1,11 +1,16 @@
 import type { Agent, BridgeEvent, BridgeSnapshot, CreateTaskInput, PetPosition, ProfileContext, ProfileDetails, ReportCard, Task } from '../types';
 
 export type BridgeMode = 'mock' | 'real' | 'auto';
+export type HermesConnectionTarget = 'local' | 'managed' | 'custom';
 export type Listener = (snapshot: BridgeSnapshot, event: BridgeEvent) => void;
 
 export interface BridgeConfig {
   bridgeMode: BridgeMode;
+  hermesConnectionTarget: HermesConnectionTarget;
   hermesApiBaseUrl: string;
+  localHermesApiBaseUrl: string;
+  managedHermesApiBaseUrl: string;
+  managedHermesBearerToken: string;
   hermesDashboardBaseUrl: string;
   hermesSidecarBaseUrl: string;
 }
@@ -161,7 +166,7 @@ export type HermesDataSource =
   | 'local-hermes-state'
   | 'sidecar'
   | 'dashboard-compatibility'
-  | 'guild-owned'
+  | 'companion-owned'
   | 'mock-fallback'
   | 'unavailable'
   | 'cli-pty';

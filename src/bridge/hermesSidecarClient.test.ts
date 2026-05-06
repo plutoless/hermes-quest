@@ -10,7 +10,7 @@ describe('hermesSidecarClient', () => {
         status: 200,
         body: JSON.stringify({
           ok: true,
-          service: 'hermes-guild-sidecar',
+          service: 'hermes-companion-sidecar',
           sources: {
             sidecar: { status: 'available' },
           },
@@ -22,10 +22,10 @@ describe('hermesSidecarClient', () => {
 
     expect(status).toEqual({
       ok: true,
-      message: 'Hermes Guild sidecar available at http://127.0.0.1:8765',
+      message: 'Hermes Companion sidecar available at http://127.0.0.1:8765',
       data: {
         ok: true,
-        service: 'hermes-guild-sidecar',
+        service: 'hermes-companion-sidecar',
         sources: {
           sidecar: { status: 'available' },
         },
@@ -50,7 +50,7 @@ describe('hermesSidecarClient', () => {
 
     await expect(client.checkHealth()).resolves.toEqual({
       ok: false,
-      message: 'Hermes Guild sidecar health returned HTTP 503.',
+      message: 'Hermes Companion sidecar health returned HTTP 503.',
       data: { error: { message: 'sidecar down' } },
     });
   });

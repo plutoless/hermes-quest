@@ -1,12 +1,12 @@
 [package]
-name = "hermes-guild"
+name = "hermes-companion"
 version = "0.1.0"
-description = "Hermes Guild desktop workbench"
-authors = ["Hermes Guild"]
+description = "Hermes Companion desktop workbench"
+authors = ["Hermes Companion"]
 edition = "2021"
 
 [lib]
-name = "hermes_guild_lib"
+name = "hermes_companion_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

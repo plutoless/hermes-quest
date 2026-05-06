@@ -10,6 +10,7 @@ import type {
   BridgeConfig,
   HermesApiClient,
   HermesBridgeApi,
+  HermesConnectionTarget,
   HermesDashboardApiClient,
   HermesDashboardStatus,
   HermesProfileClient,
@@ -20,11 +21,15 @@ import type {
   HermesSidecarStatus,
 } from './types';
 
-const configStorageKey = 'hermes-guild.bridge-config';
+const configStorageKey = 'hermes-companion.bridge-config';
 
 const defaultConfig: BridgeConfig = {
   bridgeMode: 'auto',
   hermesApiBaseUrl: 'http://127.0.0.1:8642',
+  hermesConnectionTarget: 'local',
+  localHermesApiBaseUrl: 'http://127.0.0.1:8642',
+  managedHermesApiBaseUrl: managedHermesApiBaseUrlFromEnv(),
+  managedHermesBearerToken: '',
   hermesDashboardBaseUrl: 'http://127.0.0.1:9119',
   hermesSidecarBaseUrl: 'http://127.0.0.1:8765',
 };
@@ -58,7 +63,10 @@ export function saveBridgeConfig(config: BridgeConfig) {
 
 export async function createBridgeFromConfig(config: Partial<BridgeConfig>, options: BridgeFactoryOptions = {}): Promise<HermesBridgeApi> {
   const sanitized = sanitizeConfig(config);
-  const apiClient = options.apiClient ?? await createDefaultHermesApiClient(sanitized.hermesApiBaseUrl);
+  const preflightUnavailable = hermesConnectionUnavailableReason(sanitized);
+  const apiClient = preflightUnavailable
+    ? unavailableHermesApiClient(preflightUnavailable)
+    : options.apiClient ?? await createDefaultHermesApiClient(sanitized.hermesApiBaseUrl, hermesApiRequestHeaders(sanitized));
   const dashboardClient = options.dashboardClient ?? await createDefaultHermesDashboardApiClient(sanitized.hermesDashboardBaseUrl);
   const sidecarClient = options.sidecarClient ?? await createDefaultHermesSidecarClient(sanitized.hermesSidecarBaseUrl);
   const profileClient = options.profileClient ?? await createDefaultHermesProfileClient(sanitized.hermesSidecarBaseUrl);
@@ -70,6 +78,11 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
       bridgeMode: 'mock',
       activeImplementation: 'mock',
       hermesAvailable: 'unchecked',
+      hermesConnectionTarget: sanitized.hermesConnectionTarget,
+      hermesConnectionStatus: connectionStatusFromConfig(sanitized, false),
+      hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
+      localHermesApiBaseUrl: sanitized.localHermesApiBaseUrl,
+      managedHermesApiBaseUrl: sanitized.managedHermesApiBaseUrl,
       dashboardAvailable: 'unchecked',
       sidecarAvailable: 'unchecked',
       hermesDashboardBaseUrl: sanitized.hermesDashboardBaseUrl,
@@ -79,6 +92,26 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
   }
 
   const realBridge = new RealHermesBridge(sanitized, apiClient, sidecarClient, profileRunClient, profileDetailsClient);
+  if (preflightUnavailable) {
+    realBridge.applyHermesProfile(undefined);
+    realBridge.setRuntimeStatus({
+      bridgeMode: sanitized.bridgeMode,
+      activeImplementation: 'real',
+      hermesAvailable: 'unavailable',
+      hermesConnectionTarget: sanitized.hermesConnectionTarget,
+      hermesConnectionStatus: connectionStatusFromConfig(sanitized, false),
+      hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
+      localHermesApiBaseUrl: sanitized.localHermesApiBaseUrl,
+      managedHermesApiBaseUrl: sanitized.managedHermesApiBaseUrl,
+      hermesDashboardBaseUrl: sanitized.hermesDashboardBaseUrl,
+      hermesSidecarBaseUrl: sanitized.hermesSidecarBaseUrl,
+      dashboardAvailable: 'unchecked',
+      sidecarAvailable: 'unchecked',
+      logsSummary: `Bridge mode: ${sanitized.bridgeMode}. Active implementation: real. Hermes unavailable: ${preflightUnavailable}`,
+    });
+    realBridge.markUnavailable(preflightUnavailable);
+    return realBridge;
+  }
   const health = await realBridge.getHealth?.();
   const dashboardStatus = health?.ok ? await dashboardClient.checkStatus() : undefined;
   const sidecarStatus = health?.ok ? await sidecarClient.checkHealth() : undefined;
@@ -95,7 +128,11 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
       bridgeMode: 'real',
       activeImplementation: 'real',
       hermesAvailable: health?.ok || hasProfileList ? 'available' : 'unavailable',
+      hermesConnectionTarget: sanitized.hermesConnectionTarget,
+      hermesConnectionStatus: connectionStatusFromConfig(sanitized, Boolean(health?.ok || hasProfileList)),
       hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
+      localHermesApiBaseUrl: sanitized.localHermesApiBaseUrl,
+      managedHermesApiBaseUrl: sanitized.managedHermesApiBaseUrl,
       ...dashboardPatch,
       ...sidecarPatch,
       dataSources: {
@@ -134,7 +171,11 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
       bridgeMode: 'auto',
       activeImplementation: 'real',
       hermesAvailable: 'available',
+      hermesConnectionTarget: sanitized.hermesConnectionTarget,
+      hermesConnectionStatus: connectionStatusFromConfig(sanitized, true),
       hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
+      localHermesApiBaseUrl: sanitized.localHermesApiBaseUrl,
+      managedHermesApiBaseUrl: sanitized.managedHermesApiBaseUrl,
       ...dashboardPatch,
       ...sidecarPatch,
       dataSources: {
@@ -160,7 +201,11 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
       bridgeMode: 'auto',
       activeImplementation: 'real',
       hermesAvailable: 'available',
+      hermesConnectionTarget: sanitized.hermesConnectionTarget,
+      hermesConnectionStatus: connectionStatusFromConfig(sanitized, true),
       hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
+      localHermesApiBaseUrl: sanitized.localHermesApiBaseUrl,
+      managedHermesApiBaseUrl: sanitized.managedHermesApiBaseUrl,
       hermesDashboardBaseUrl: sanitized.hermesDashboardBaseUrl,
       hermesSidecarBaseUrl: sanitized.hermesSidecarBaseUrl,
       dashboardAvailable: 'unchecked',
@@ -177,7 +222,11 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
     bridgeMode: 'auto',
     activeImplementation: 'real',
     hermesAvailable: 'unavailable',
+    hermesConnectionTarget: sanitized.hermesConnectionTarget,
+    hermesConnectionStatus: connectionStatusFromConfig(sanitized, false),
     hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
+    localHermesApiBaseUrl: sanitized.localHermesApiBaseUrl,
+    managedHermesApiBaseUrl: sanitized.managedHermesApiBaseUrl,
     hermesDashboardBaseUrl: sanitized.hermesDashboardBaseUrl,
     hermesSidecarBaseUrl: sanitized.hermesSidecarBaseUrl,
     dashboardAvailable: 'unchecked',
@@ -254,7 +303,7 @@ function applySidecarExecutionRouting(
 ): HermesProfileListResult | undefined {
   if (!profileList?.ok || profileList.executionRouting === 'supported') return profileList;
   if (profileList.source !== 'cli' || !sidecarRunsSupported(sidecarCapabilities)) return profileList;
-  const reason = sidecarRunReason(sidecarCapabilities) ?? 'Verified CLI route through Hermes Guild sidecar.';
+  const reason = sidecarRunReason(sidecarCapabilities) ?? 'Verified CLI route through Hermes Companion sidecar.';
   return {
     ...profileList,
     profiles: profileList.profiles.map((profile) => ({
@@ -369,9 +418,21 @@ function sanitizeConfig(raw: unknown): BridgeConfig {
   const bridgeMode = candidate.bridgeMode === 'mock' || candidate.bridgeMode === 'real' || candidate.bridgeMode === 'auto'
     ? candidate.bridgeMode
     : defaultConfig.bridgeMode;
-  const hermesApiBaseUrl = typeof candidate.hermesApiBaseUrl === 'string' && candidate.hermesApiBaseUrl.trim()
-    ? normalizeBaseUrl(candidate.hermesApiBaseUrl)
-    : defaultConfig.hermesApiBaseUrl;
+  const hermesConnectionTarget = isHermesConnectionTarget(candidate.hermesConnectionTarget)
+    ? candidate.hermesConnectionTarget
+    : defaultConfig.hermesConnectionTarget;
+  const localHermesApiBaseUrl = typeof candidate.localHermesApiBaseUrl === 'string' && candidate.localHermesApiBaseUrl.trim()
+    ? normalizeBaseUrl(candidate.localHermesApiBaseUrl)
+    : typeof candidate.hermesApiBaseUrl === 'string' && candidate.hermesApiBaseUrl.trim()
+      ? normalizeBaseUrl(candidate.hermesApiBaseUrl)
+      : defaultConfig.localHermesApiBaseUrl;
+  const managedHermesApiBaseUrl = typeof candidate.managedHermesApiBaseUrl === 'string' && candidate.managedHermesApiBaseUrl.trim()
+    ? normalizeBaseUrl(candidate.managedHermesApiBaseUrl)
+    : managedHermesApiBaseUrlFromEnv();
+  const managedHermesBearerToken = typeof candidate.managedHermesBearerToken === 'string'
+    ? candidate.managedHermesBearerToken.trim()
+    : defaultConfig.managedHermesBearerToken;
+  const hermesApiBaseUrl = effectiveHermesApiBaseUrl(hermesConnectionTarget, localHermesApiBaseUrl, managedHermesApiBaseUrl);
   const hermesDashboardBaseUrl = typeof candidate.hermesDashboardBaseUrl === 'string' && candidate.hermesDashboardBaseUrl.trim()
     ? normalizeBaseUrl(candidate.hermesDashboardBaseUrl, defaultConfig.hermesDashboardBaseUrl)
     : defaultConfig.hermesDashboardBaseUrl;
@@ -380,9 +441,86 @@ function sanitizeConfig(raw: unknown): BridgeConfig {
     : defaultConfig.hermesSidecarBaseUrl;
   return {
     bridgeMode,
+    hermesConnectionTarget,
     hermesApiBaseUrl,
+    localHermesApiBaseUrl,
+    managedHermesApiBaseUrl,
+    managedHermesBearerToken,
     hermesDashboardBaseUrl,
     hermesSidecarBaseUrl,
+  };
+}
+
+function isHermesConnectionTarget(value: unknown): value is HermesConnectionTarget {
+  return value === 'local' || value === 'managed' || value === 'custom';
+}
+
+function effectiveHermesApiBaseUrl(
+  target: HermesConnectionTarget,
+  localHermesApiBaseUrl: string,
+  managedHermesApiBaseUrl: string,
+) {
+  if (target === 'managed') return managedHermesApiBaseUrl || localHermesApiBaseUrl;
+  return localHermesApiBaseUrl;
+}
+
+function hermesConnectionUnavailableReason(config: BridgeConfig) {
+  if (config.hermesConnectionTarget !== 'managed') return undefined;
+  if (!config.managedHermesApiBaseUrl) return 'Managed Hermes URL is not configured. Set VITE_HERMES_MANAGED_API_BASE_URL at build time.';
+  if (!config.managedHermesBearerToken) return 'Managed Hermes token required. Add a bearer token in Settings before connecting.';
+  return undefined;
+}
+
+function hermesApiRequestHeaders(config: BridgeConfig): Record<string, string> {
+  return config.hermesConnectionTarget === 'managed' && config.managedHermesBearerToken
+    ? { Authorization: `Bearer ${config.managedHermesBearerToken}` }
+    : {};
+}
+
+function connectionStatusFromConfig(config: BridgeConfig, connected: boolean) {
+  if (config.hermesConnectionTarget === 'local') return connected ? 'local' : 'unavailable';
+  if (config.hermesConnectionTarget === 'managed' && !config.managedHermesApiBaseUrl) return 'managed-url-not-configured';
+  if (config.hermesConnectionTarget === 'managed' && !config.managedHermesBearerToken) return 'managed-missing-token';
+  if (config.hermesConnectionTarget === 'managed') return connected ? 'managed-connected' : 'unavailable';
+  return 'unavailable';
+}
+
+function managedHermesApiBaseUrlFromEnv() {
+  const viteEnv = (import.meta as unknown as { env?: Record<string, string | undefined> }).env;
+  const processEnv = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process?.env;
+  const value = viteEnv?.VITE_HERMES_MANAGED_API_BASE_URL ?? processEnv?.VITE_HERMES_MANAGED_API_BASE_URL ?? '';
+  return value.trim() ? normalizeBaseUrl(value) : '';
+}
+
+function unavailableHermesApiClient(message: string): HermesApiClient {
+  const endpoint = async () => ({ ok: false, status: 0, error: message });
+  return {
+    checkHealth: async () => ({ ok: false, message }),
+    checkDetailedHealth: endpoint,
+    listModels: endpoint,
+    getCapabilities: endpoint,
+    listProfiles: async () => ({
+      ok: false,
+      profiles: [],
+      source: 'unavailable',
+      message,
+    }),
+    getActiveProfile: endpoint,
+    createChatCompletion: endpoint,
+    createResponse: endpoint,
+    getResponse: endpoint,
+    deleteResponse: endpoint,
+    getRun: endpoint,
+    stopRun: endpoint,
+    listJobs: endpoint,
+    createJob: endpoint,
+    getJob: endpoint,
+    updateJob: endpoint,
+    deleteJob: endpoint,
+    pauseJob: endpoint,
+    resumeJob: endpoint,
+    runJob: endpoint,
+    runTask: async () => ({ ok: false, output: '', error: message, events: [] }),
   };
 }
 
@@ -397,7 +535,7 @@ function statusFromDashboard(config: BridgeConfig, status: HermesDashboardStatus
       gateway: 'gateway-rest',
       profiles: 'gateway-rest',
       tasks: 'gateway-rest',
-      review: 'guild-owned',
+      review: 'companion-owned',
       sessions: dashboardSource,
       logs: dashboardSource,
       analytics: dashboardSource,
@@ -416,7 +554,7 @@ function statusFromDashboard(config: BridgeConfig, status: HermesDashboardStatus
 
 function statusFromSidecar(config: BridgeConfig, status: HermesSidecarStatus | undefined) {
   const sidecarAvailable = status?.ok ? 'available' : 'unavailable';
-  const warning = status?.ok || !status ? undefined : `Hermes Guild sidecar unavailable: ${status.message}`;
+  const warning = status?.ok || !status ? undefined : `Hermes Companion sidecar unavailable: ${status.message}`;
   return {
     sidecarAvailable,
     hermesSidecarBaseUrl: config.hermesSidecarBaseUrl,
@@ -440,7 +578,11 @@ function decorateMockBridge(
       Pick<
         ReturnType<HermesBridgeApi['getSnapshot']>['systemStatus'],
         | 'fallbackReason'
+        | 'hermesConnectionTarget'
+        | 'hermesConnectionStatus'
         | 'hermesApiBaseUrl'
+        | 'localHermesApiBaseUrl'
+        | 'managedHermesApiBaseUrl'
         | 'hermesDashboardBaseUrl'
         | 'hermesSidecarBaseUrl'
         | 'dashboardAvailable'

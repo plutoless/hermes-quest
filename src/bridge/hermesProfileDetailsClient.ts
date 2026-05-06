@@ -36,11 +36,11 @@ export class FetchHermesProfileDetailsClient implements HermesProfileDetailsClie
       const response = await fetch(`${this.baseUrl}/profiles/${id}/details?name=${name}`);
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        return unavailableProfileDetails(profile, `Hermes Guild sidecar profile details returned HTTP ${response.status}.`);
+        return unavailableProfileDetails(profile, `Hermes Companion sidecar profile details returned HTTP ${response.status}.`);
       }
       return profileDetailsFromPayload(payload, profile);
     } catch (error) {
-      return unavailableProfileDetails(profile, `Hermes Guild sidecar profile details request failed: ${messageFromUnknown(error)}`);
+      return unavailableProfileDetails(profile, `Hermes Companion sidecar profile details request failed: ${messageFromUnknown(error)}`);
     }
   }
 }
@@ -173,7 +173,7 @@ function unavailableProfileDetails(profile: HermesProfileMetadata | undefined, r
 }
 
 function dataSource(value: unknown): HermesDataSource | undefined {
-  const allowed: HermesDataSource[] = ['public-rest', 'gateway-rest', 'cli', 'local-state', 'local-hermes-state', 'sidecar', 'dashboard-compatibility', 'guild-owned', 'mock-fallback', 'unavailable', 'cli-pty'];
+  const allowed: HermesDataSource[] = ['public-rest', 'gateway-rest', 'cli', 'local-state', 'local-hermes-state', 'sidecar', 'dashboard-compatibility', 'companion-owned', 'mock-fallback', 'unavailable', 'cli-pty'];
   return typeof value === 'string' && allowed.includes(value as HermesDataSource) ? value as HermesDataSource : undefined;
 }
 

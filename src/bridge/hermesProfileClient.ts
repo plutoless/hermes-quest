@@ -72,11 +72,11 @@ export class FetchHermesProfileClient implements HermesProfileClient {
       const response = await fetch(`${this.baseUrl}/profiles`);
       const payload = await response.json();
       if (!response.ok) {
-        return unavailableResult(`Hermes Guild sidecar /profiles returned HTTP ${response.status}.`);
+        return unavailableResult(`Hermes Companion sidecar /profiles returned HTTP ${response.status}.`);
       }
       return resultFromSidecarPayload(payload);
     } catch (error) {
-      return unavailableResult(`Hermes Guild sidecar /profiles request failed: ${messageFromUnknown(error)}`);
+      return unavailableResult(`Hermes Companion sidecar /profiles request failed: ${messageFromUnknown(error)}`);
     }
   }
 }
@@ -128,7 +128,7 @@ export function parseHermesProfileListTable(text: string) {
 
 function resultFromSidecarPayload(payload: unknown): HermesProfileListResult {
   if (!payload || typeof payload !== 'object') {
-    return unavailableResult('Hermes Guild sidecar returned invalid profile payload.');
+    return unavailableResult('Hermes Companion sidecar returned invalid profile payload.');
   }
   const candidate = payload as Record<string, unknown>;
   const source = dataSource(candidate.source) ?? 'sidecar';
@@ -141,7 +141,7 @@ function resultFromSidecarPayload(payload: unknown): HermesProfileListResult {
     .map((item) => profileFromUnknown(item, source, executionRouting, executionRoutingReason))
     .filter((profile): profile is HermesProfileMetadata => Boolean(profile));
   if (profiles.length === 0) {
-    return unavailableResult(stringField(candidate.unavailable_reason) ?? 'Hermes Guild sidecar returned no profiles.');
+    return unavailableResult(stringField(candidate.unavailable_reason) ?? 'Hermes Companion sidecar returned no profiles.');
   }
   return {
     ok: true,
@@ -203,7 +203,7 @@ function unavailableResult(message: string): HermesProfileListResult {
 }
 
 function dataSource(value: unknown): HermesDataSource | undefined {
-  const allowed: HermesDataSource[] = ['public-rest', 'gateway-rest', 'cli', 'local-state', 'local-hermes-state', 'sidecar', 'dashboard-compatibility', 'guild-owned', 'mock-fallback', 'unavailable', 'cli-pty'];
+  const allowed: HermesDataSource[] = ['public-rest', 'gateway-rest', 'cli', 'local-state', 'local-hermes-state', 'sidecar', 'dashboard-compatibility', 'companion-owned', 'mock-fallback', 'unavailable', 'cli-pty'];
   return typeof value === 'string' && allowed.includes(value as HermesDataSource) ? value as HermesDataSource : undefined;
 }
 

@@ -138,9 +138,9 @@ for (const label of ['main', 'pet', ...panelLabels]) {
 }
 
 const requiredCargoFragments = [
-  'name = "hermes-guild"',
+  'name = "hermes-companion"',
   'edition = "2021"',
-  'name = "hermes_guild_lib"',
+  'name = "hermes_companion_lib"',
   'tauri-build = { version = "2"',
   'tauri = { version = "2"',
   'tauri-plugin-opener = "2"',
@@ -166,8 +166,8 @@ if (!nativeLib.includes('tauri::generate_context!()')) {
   fail('src-tauri/src/lib.rs must run with generated Tauri context');
 }
 
-if (!nativeMain.includes('hermes_guild_lib::run()')) {
-  fail('src-tauri/src/main.rs must call hermes_guild_lib::run()');
+if (!nativeMain.includes('hermes_companion_lib::run()')) {
+  fail('src-tauri/src/main.rs must call hermes_companion_lib::run()');
 }
 
 if (!nativeBuild.includes('tauri_build::build()')) {

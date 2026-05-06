@@ -71,7 +71,7 @@ describe('hermesDashboardApiClient', () => {
     await client.getConfig();
     await client.getConfigDefaults();
     await client.getConfigSchema();
-    await client.updateConfig({ theme: 'guild' });
+    await client.updateConfig({ theme: 'companion' });
     await client.getEnv();
     await client.updateEnv({ OPENAI_API_KEY: 'redacted' });
     await client.deleteEnv('OPENAI_API_KEY');
@@ -96,7 +96,7 @@ describe('hermesDashboardApiClient', () => {
       { method: 'GET', url: 'http://127.0.0.1:9119/api/config', headers: { 'X-Hermes-Session-Token': token } },
       { method: 'GET', url: 'http://127.0.0.1:9119/api/config/defaults' },
       { method: 'GET', url: 'http://127.0.0.1:9119/api/config/schema' },
-      { method: 'PUT', url: 'http://127.0.0.1:9119/api/config', body: { theme: 'guild' }, headers: { 'Content-Type': 'application/json', 'X-Hermes-Session-Token': token } },
+      { method: 'PUT', url: 'http://127.0.0.1:9119/api/config', body: { theme: 'companion' }, headers: { 'Content-Type': 'application/json', 'X-Hermes-Session-Token': token } },
       { method: 'GET', url: 'http://127.0.0.1:9119/api/env', headers: { 'X-Hermes-Session-Token': token } },
       { method: 'PUT', url: 'http://127.0.0.1:9119/api/env', body: { OPENAI_API_KEY: 'redacted' }, headers: { 'Content-Type': 'application/json', 'X-Hermes-Session-Token': token } },
       { method: 'DELETE', url: 'http://127.0.0.1:9119/api/env', body: { key: 'OPENAI_API_KEY' }, headers: { 'Content-Type': 'application/json', 'X-Hermes-Session-Token': token } },

@@ -25,13 +25,14 @@ describe('Hermes companion runtime', () => {
     expect(html).not.toContain('Sprite Animation Preview');
     expect(html).not.toContain('Show on desktop');
 
-    expect(html).not.toContain('Guild Hall');
-    expect(html).not.toContain('Quest Board');
+    expect(html).not.toContain('Companion Home');
+    expect(html).not.toContain('Companion chat');
     expect(html).not.toContain('Review Chamber');
   });
 
   test('panel routes render isolated control windows', () => {
     const originalWindow = globalThis.window;
+    const originalLocalStorage = globalThis.localStorage;
 
     try {
       Object.defineProperty(globalThis, 'window', {
@@ -47,14 +48,38 @@ describe('Hermes companion runtime', () => {
         configurable: true,
         value: { location: { search: '?panel=settings' } },
       });
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: {
+          getItem: (key: string) => key === 'hermes-companion.bridge-config'
+            ? JSON.stringify({
+              bridgeMode: 'real',
+              hermesConnectionTarget: 'managed',
+              managedHermesApiBaseUrl: 'https://managed.example.com/hermes',
+              managedHermesBearerToken: '',
+            })
+            : null,
+          setItem: () => undefined,
+          removeItem: () => undefined,
+          clear: () => undefined,
+        },
+      });
       const settingsHtml = renderToStaticMarkup(React.createElement(App));
       expect(settingsHtml).toContain('panel-window-settings');
       expect(settingsHtml).toContain('Show speech bubbles');
+      expect(settingsHtml).toContain('Hermes connection');
+      expect(settingsHtml).toContain('Local');
+      expect(settingsHtml).toContain('Managed');
+      expect(settingsHtml).toContain('Bearer token');
       expect(settingsHtml).not.toContain('companion-stage');
     } finally {
       Object.defineProperty(globalThis, 'window', {
         configurable: true,
         value: originalWindow,
+      });
+      Object.defineProperty(globalThis, 'localStorage', {
+        configurable: true,
+        value: originalLocalStorage,
       });
     }
   });

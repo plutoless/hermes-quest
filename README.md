@@ -66,6 +66,7 @@ bun run tauri:dev
 - Browser fallback windows for companion, appearance, companions, and settings panels when Tauri is unavailable.
 - Native Tauri panel windows for companion, appearance, companions, and settings.
 - `mock`, `real`, and `auto` bridge modes for chat provider selection.
+- Local and Managed Hermes connection targets for real Hermes API calls.
 
 ## Bridge Modes
 
@@ -78,6 +79,16 @@ Hermes Companion has three bridge modes:
 Mock output is acceptable for local development and explicit test harnesses. Real mode should not silently substitute mock output when Hermes is unavailable.
 
 Real mode currently calls the local Hermes API through the bridge code. In browser/Vite mode, those calls use `fetch()` and may require CORS support from the Hermes API server. In native Tauri mode, the app can use the Rust `hermes_api_request` command so local API access is not blocked by WebView-origin CORS.
+
+## Hermes Connection Targets
+
+Bridge mode decides provider/fallback behavior. The Hermes connection target decides where real Hermes API requests go:
+
+- `local`: calls the local Hermes API, defaulting to `http://127.0.0.1:8642`.
+- `managed`: calls a build-configured managed Hermes server and sends the saved bearer token as `Authorization: Bearer <token>`.
+- `custom`: reserved in config/types for a later pass and not exposed in the Settings UI yet.
+
+Set the managed server base URL at build time with `VITE_HERMES_MANAGED_API_BASE_URL`. Hermes Companion does not hard-code a production managed URL. If Managed is selected without that URL or without a token, the bridge reports the missing requirement before making Hermes API requests.
 
 ## Native Notes
 

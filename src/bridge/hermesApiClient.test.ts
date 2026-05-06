@@ -90,6 +90,33 @@ describe('hermesApiClient', () => {
     });
   });
 
+  test('native client sends managed authorization headers through health, runs, and events', async () => {
+    const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
+    const client = new NativeHermesApiClient(
+      'https://managed.example.com/hermes',
+      async (command, args) => {
+        calls.push({ command, args });
+        if (args?.url === 'https://managed.example.com/hermes/v1/runs') {
+          return { status: 202, body: JSON.stringify({ run_id: 'run_123' }) };
+        }
+        if (args?.url === 'https://managed.example.com/hermes/v1/runs/run_123/events') {
+          return { status: 200, body: 'data: {"event":"run.completed","output":"done"}\n\n' };
+        }
+        return { status: 200, body: JSON.stringify({ status: 'ok', platform: 'hermes-agent' }) };
+      },
+      { Authorization: 'Bearer managed-token' },
+    );
+
+    await client.checkHealth();
+    await client.runTask({ input: 'Run managed task.' });
+
+    expect(calls.map((call) => call.args?.headers)).toEqual([
+      { Authorization: 'Bearer managed-token' },
+      { Authorization: 'Bearer managed-token' },
+      { Authorization: 'Bearer managed-token' },
+    ]);
+  });
+
   test('native client includes selected profile only when routing is capability-supported', async () => {
     const calls: Array<{ command: string; args?: Record<string, unknown> }> = [];
     const client = new NativeHermesApiClient('http://127.0.0.1:8642', async (command, args) => {
@@ -273,6 +300,34 @@ describe('hermesApiClient', () => {
     try {
       const health = await new FetchHermesApiClient('http://127.0.0.1:8642').checkHealth();
       expect(health).toEqual({ ok: false, message: 'Hermes API health returned HTTP 403.' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('fetch client sends managed authorization headers and local clients send none', async () => {
+    const originalFetch = globalThis.fetch;
+    const calls: Array<{ url: string; headers?: HeadersInit }> = [];
+    globalThis.fetch = async (input, init) => {
+      calls.push({ url: String(input), headers: init?.headers });
+      return new Response(JSON.stringify({ status: 'ok', platform: 'hermes-agent' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    };
+
+    try {
+      await new FetchHermesApiClient('http://127.0.0.1:8642').checkHealth();
+      await new FetchHermesApiClient('https://managed.example.com/hermes', {
+        Authorization: 'Bearer managed-token',
+      }).checkHealth();
+      expect(calls).toEqual([
+        { url: 'http://127.0.0.1:8642/health', headers: undefined },
+        {
+          url: 'https://managed.example.com/hermes/health',
+          headers: { Authorization: 'Bearer managed-token' },
+        },
+      ]);
     } finally {
       globalThis.fetch = originalFetch;
     }

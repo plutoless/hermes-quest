@@ -4,8 +4,8 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from sidecar.hermes_guild_sidecar import (
-    HermesGuildSidecar,
+from sidecar.hermes_companion_sidecar import (
+    HermesCompanionSidecar,
     SidecarConfig,
     hermes_import_status,
     is_loopback_host,
@@ -13,9 +13,9 @@ from sidecar.hermes_guild_sidecar import (
 )
 
 
-class HermesGuildSidecarTest(unittest.TestCase):
-    def make_sidecar(self, hermes_home: Path) -> HermesGuildSidecar:
-        return HermesGuildSidecar(
+class HermesCompanionSidecarTest(unittest.TestCase):
+    def make_sidecar(self, hermes_home: Path) -> HermesCompanionSidecar:
+        return HermesCompanionSidecar(
             SidecarConfig(
                 hermes_home=hermes_home,
                 gateway_base_url="http://127.0.0.1:1",
@@ -30,7 +30,7 @@ class HermesGuildSidecarTest(unittest.TestCase):
 
         self.assertEqual(response.status, 200)
         self.assertTrue(response.body["ok"])
-        self.assertEqual(response.body["service"], "hermes-guild-sidecar")
+        self.assertEqual(response.body["service"], "hermes-companion-sidecar")
         self.assertTrue(response.body["loopback_only"])
         self.assertEqual(response.body["sources"]["public_rest"]["status"], "unchecked")
         self.assertEqual(response.body["sources"]["cli"]["status"], "unchecked")
@@ -45,7 +45,7 @@ class HermesGuildSidecarTest(unittest.TestCase):
     def test_missing_cli_is_structured_unavailable(self):
         with tempfile.TemporaryDirectory() as temp_dir:
             with patch("shutil.which", return_value=None):
-                sidecar = HermesGuildSidecar(
+                sidecar = HermesCompanionSidecar(
                     SidecarConfig(
                         hermes_home=Path(temp_dir),
                         gateway_base_url="http://127.0.0.1:1",
@@ -71,14 +71,14 @@ class HermesGuildSidecarTest(unittest.TestCase):
         self.assertEqual(capabilities.status, 200)
         self.assertEqual(
             capabilities.body["source_precedence"],
-            ["public-rest", "cli", "local-state", "sidecar", "guild-owned", "unavailable"],
+            ["public-rest", "cli", "local-state", "sidecar", "companion-owned", "unavailable"],
         )
         for response in (runs, run_status, events, stop):
             self.assertIn(response.status, (400, 404, 501))
 
     def test_selected_profile_run_uses_cli_profile_oneshot_without_global_switch(self):
         with tempfile.TemporaryDirectory() as temp_dir:
-            sidecar = HermesGuildSidecar(
+            sidecar = HermesCompanionSidecar(
                 SidecarConfig(
                     hermes_home=Path(temp_dir),
                     gateway_base_url="http://127.0.0.1:1",
@@ -186,7 +186,7 @@ class HermesGuildSidecarTest(unittest.TestCase):
  frieren         deepseek-v4-flash            stopped      frieren
 """
         with tempfile.TemporaryDirectory() as temp_dir:
-            sidecar = HermesGuildSidecar(
+            sidecar = HermesCompanionSidecar(
                 SidecarConfig(
                     hermes_home=Path(temp_dir),
                     gateway_base_url="http://127.0.0.1:1",

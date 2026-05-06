@@ -1,1 +1,1 @@
-"""Hermes Guild sidecar tests."""
+"""Hermes Companion sidecar tests."""

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Hermes Guild local compatibility sidecar.
+"""Hermes Companion local compatibility sidecar.
 
 This service is intentionally small and stdlib-only. It exposes local
 capability probes without becoming the preferred task execution path.
@@ -31,12 +31,12 @@ SOURCE_PRECEDENCE = [
     "cli",
     "local-state",
     "sidecar",
-    "guild-owned",
+    "companion-owned",
     "unavailable",
 ]
 MAX_TEXT_BYTES = 4096
 RUN_TIMEOUT_SECONDS = 300
-PUBLIC_REST_REASON = "Gateway REST /v1/runs remains the preferred Hermes Guild execution path."
+PUBLIC_REST_REASON = "Gateway REST /v1/runs remains the preferred Hermes Companion execution path."
 CLI_PROFILE_RUN_REASON = "Verified CLI route: hermes -p <profile> -z <prompt> scopes execution without changing sticky active profile."
 
 
@@ -54,7 +54,7 @@ class JsonResponse:
     body: Dict[str, Any]
 
 
-class HermesGuildSidecar:
+class HermesCompanionSidecar:
     def __init__(self, config: Optional[SidecarConfig] = None):
         self.config = config or SidecarConfig()
         self.started_at = time.time()
@@ -102,7 +102,7 @@ class HermesGuildSidecar:
         local_state = self._local_state_status()
         return {
             "ok": True,
-            "service": "hermes-guild-sidecar",
+            "service": "hermes-companion-sidecar",
             "sidecar_version": SIDECAR_VERSION,
             "uptime_seconds": round(time.time() - self.started_at, 3),
             "loopback_only": True,
@@ -724,7 +724,7 @@ def is_loopback_host(host: str) -> bool:
 
 
 class SidecarRequestHandler(BaseHTTPRequestHandler):
-    sidecar = HermesGuildSidecar()
+    sidecar = HermesCompanionSidecar()
 
     def do_GET(self) -> None:
         self._respond(self.sidecar.response_for("GET", self.path))
@@ -753,7 +753,7 @@ class SidecarRequestHandler(BaseHTTPRequestHandler):
         del format, args
 
 
-def make_handler(sidecar: HermesGuildSidecar):
+def make_handler(sidecar: HermesCompanionSidecar):
     class ConfiguredSidecarRequestHandler(SidecarRequestHandler):
         pass
 
@@ -764,13 +764,13 @@ def make_handler(sidecar: HermesGuildSidecar):
 def run_server(host: str, port: int, config: SidecarConfig) -> None:
     if not is_loopback_host(host):
         raise ValueError(f"Refusing non-loopback host: {host}")
-    server = ThreadingHTTPServer((host, port), make_handler(HermesGuildSidecar(config)))
-    print(json.dumps({"service": "hermes-guild-sidecar", "host": host, "port": port, "loopback_only": True}))
+    server = ThreadingHTTPServer((host, port), make_handler(HermesCompanionSidecar(config)))
+    print(json.dumps({"service": "hermes-companion-sidecar", "host": host, "port": port, "loopback_only": True}))
     server.serve_forever()
 
 
 def self_test() -> int:
-    sidecar = HermesGuildSidecar(SidecarConfig(check_gateway=False, check_cli=False))
+    sidecar = HermesCompanionSidecar(SidecarConfig(check_gateway=False, check_cli=False))
     checks: list[Tuple[str, str, int]] = [
         ("GET", "/health", 200),
         ("GET", "/version", 200),
@@ -795,7 +795,7 @@ def self_test() -> int:
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Hermes Guild local sidecar")
+    parser = argparse.ArgumentParser(description="Hermes Companion local sidecar")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--hermes-home", default=os.environ.get("HERMES_HOME", "~/.hermes"))

@@ -820,7 +820,7 @@ button {
 .settings-popover {
   left: 54px;
   bottom: 100px;
-  width: min(300px, calc(100vw - 42px));
+  width: min(330px, calc(100vw - 42px));
   padding: 16px;
 }
 
@@ -840,6 +840,75 @@ button {
   height: 17px;
   color: var(--icon-muted);
   stroke-width: 2;
+}
+
+.connection-settings {
+  display: grid;
+  gap: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--panel-line);
+}
+
+.connection-targets {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.connection-targets button,
+.token-row button {
+  min-height: 32px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.42);
+  color: #5f5968;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.connection-targets button.active {
+  border-color: rgba(74, 63, 94, 0.22);
+  background: rgba(255, 255, 255, 0.72);
+  color: #3f394d;
+  box-shadow: inset 0 0 0 1px rgba(74, 63, 94, 0.08);
+}
+
+.token-row button:disabled {
+  opacity: 0.55;
+}
+
+.connection-settings small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.token-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.token-row span {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #5f5968;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.token-row input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--panel-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 0 10px;
+  color: #3f394d;
+  font: inherit;
 }
 
 .bridge-state {

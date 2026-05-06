@@ -53,7 +53,7 @@ const realAgentsSeed: Agent[] = [
     bestFor: 'competitive scans, synthesis, source-heavy briefs',
     avoid: 'fast code edits without context',
     health: 'Mapped to Hermes profile',
-    equipment: ['Hermes API server', 'Guild role routing', 'Workspace context'],
+    equipment: ['Hermes API server', 'Companion routing', 'Workspace context'],
     skills: [],
   },
   {
@@ -67,7 +67,7 @@ const realAgentsSeed: Agent[] = [
     bestFor: 'implementation plans, demos, runnable product slices',
     avoid: 'unbounded strategy memos',
     health: 'Mapped to Hermes profile',
-    equipment: ['Hermes API server', 'Guild role routing', 'Workspace tools'],
+    equipment: ['Hermes API server', 'Companion routing', 'Workspace tools'],
     skills: [],
   },
   {
@@ -81,7 +81,7 @@ const realAgentsSeed: Agent[] = [
     bestFor: 'risk checks, acceptance review, revision prompts',
     avoid: 'first-pass speculative ideation',
     health: 'Mapped to Hermes profile',
-    equipment: ['Hermes API server', 'Guild role routing', 'Review checklist'],
+    equipment: ['Hermes API server', 'Companion routing', 'Review checklist'],
     skills: [],
   },
 ];
@@ -101,7 +101,11 @@ const seedSnapshot = (config: BridgeConfig): BridgeSnapshot => ({
       bridgeMode: config.bridgeMode,
       activeImplementation: 'real',
       hermesAvailable: 'unchecked',
+      hermesConnectionTarget: config.hermesConnectionTarget,
+      hermesConnectionStatus: config.hermesConnectionTarget === 'local' ? 'local' : 'unavailable',
       hermesApiBaseUrl: config.hermesApiBaseUrl,
+      localHermesApiBaseUrl: config.localHermesApiBaseUrl,
+      managedHermesApiBaseUrl: config.managedHermesApiBaseUrl,
       hermesDashboardBaseUrl: config.hermesDashboardBaseUrl,
       hermesSidecarBaseUrl: config.hermesSidecarBaseUrl,
       dashboardAvailable: 'unchecked',
@@ -114,7 +118,7 @@ const seedSnapshot = (config: BridgeConfig): BridgeSnapshot => ({
         detailedHealth: 'unavailable',
         models: 'unavailable',
         capabilities: 'unavailable',
-        review: 'guild-owned',
+        review: 'companion-owned',
         sessions: 'unavailable',
         logs: 'unavailable',
         analytics: 'unavailable',
@@ -494,7 +498,7 @@ export class RealHermesBridge implements HermesBridgeApi {
     this.updateTask(task.id, {
       state: 'approved',
       reviewStatus: 'approved',
-      timeline: [...task.timeline, this.timeline(task.id, report.agentId, 'approved', 'Quest Report Card approved by the user.', 'guild')],
+      timeline: [...task.timeline, this.timeline(task.id, report.agentId, 'approved', 'Companion response approved by the user.', 'companion')],
     });
     this.setAgentIdle(report.agentId);
     this.emit(makeEvent('review_approved', report.agentId, task.id));
@@ -514,7 +518,7 @@ export class RealHermesBridge implements HermesBridgeApi {
       reviewStatus: 'revision_requested',
       timeline: [
         ...original.timeline,
-        this.timeline(original.id, report.agentId, 'revision_requested', `Revision requested: ${instructions}`, 'guild'),
+        this.timeline(original.id, report.agentId, 'revision_requested', `Revision requested: ${instructions}`, 'companion'),
       ],
     });
     this.emit(makeEvent('revision_requested', report.agentId, original.id, { instructions }));
@@ -573,7 +577,7 @@ export class RealHermesBridge implements HermesBridgeApi {
     this.updateTask(taskId, {
       state: 'blocked',
       reviewStatus: 'none',
-      timeline: [...stopped.timeline, this.timeline(taskId, task.assigneeId, 'blocked', 'Hermes gateway run stopped by the user.', 'guild')],
+      timeline: [...stopped.timeline, this.timeline(taskId, task.assigneeId, 'blocked', 'Hermes gateway run stopped by the user.', 'companion')],
     });
     this.snapshot.agents = this.snapshot.agents.map((agent) =>
       agent.id === task.assigneeId ? { ...agent, status: 'blocked', availability: 'available', currentTaskId: undefined } : agent,
@@ -599,7 +603,7 @@ export class RealHermesBridge implements HermesBridgeApi {
         reviewStatus: 'none',
         timeline: [
           ...task.timeline,
-          this.timeline(task.id, agentId, 'blocked', 'Real Hermes task marked blocked by the Guild test control.', 'guild'),
+          this.timeline(task.id, agentId, 'blocked', 'Real Hermes task marked blocked by the companion test control.', 'companion'),
         ],
       });
     }
@@ -608,15 +612,15 @@ export class RealHermesBridge implements HermesBridgeApi {
     );
     this.snapshot.systemStatus = {
       ...this.snapshot.systemStatus,
-      logsSummary: 'Real bridge task is blocked by Guild control.',
-      warnings: ['Blocked state is Guild-maintained; Hermes API run events do not expose a stable blocked signal yet.'],
+      logsSummary: 'Real bridge task is blocked by companion control.',
+      warnings: ['Blocked state is Companion-maintained; Hermes API run events do not expose a stable blocked signal yet.'],
     };
     this.emit(makeEvent('task_blocked', agentId, task?.id));
   }
 
   simulateError(taskId?: string) {
     const task = taskId ? this.findTask(taskId) : this.snapshot.tasks[0];
-    this.failTask(task, 'Real Hermes error simulated by Guild control.');
+    this.failTask(task, 'Real Hermes error simulated by companion control.');
   }
 
   setPetPosition(position: PetPosition) {
@@ -630,7 +634,7 @@ export class RealHermesBridge implements HermesBridgeApi {
     }
 
     const createdAt = now();
-    const taskId = id('quest');
+    const taskId = id('message');
     const profileContext = this.profileContextForTask(input.assigneeId, taskId);
     const routingEvent = this.profileRoutingEvent(taskId, input.assigneeId, profileContext);
     const task: Task = {
@@ -647,8 +651,8 @@ export class RealHermesBridge implements HermesBridgeApi {
       progress: 8,
       artifacts: [],
       timeline: [
-        this.timeline(taskId, input.assigneeId, 'created', `Quest created from ${input.type === 'pet' ? 'Pet Mode' : 'Quest Board'}.`, 'guild'),
-        this.timeline(taskId, input.assigneeId, 'assigned', `Assigned to selected Hermes profile ${this.agentName(input.assigneeId)}.`, 'guild'),
+        this.timeline(taskId, input.assigneeId, 'created', `Message created from ${input.type === 'pet' ? 'Pet Mode' : 'Companion chat'}.`, 'companion'),
+        this.timeline(taskId, input.assigneeId, 'assigned', `Assigned to selected Hermes profile ${this.agentName(input.assigneeId)}.`, 'companion'),
         ...(routingEvent ? [routingEvent] : []),
       ],
       reviewStatus: 'none',
@@ -760,7 +764,7 @@ export class RealHermesBridge implements HermesBridgeApi {
       timeline: [
         ...task.timeline,
         this.timeline(task.id, task.assigneeId, 'completed', finalOutput, 'hermes'),
-        this.timeline(task.id, task.assigneeId, 'review_required', 'Quest Report Card is ready for review.', 'guild'),
+        this.timeline(task.id, task.assigneeId, 'review_required', 'Companion response is ready for review.', 'companion'),
       ],
     });
     this.snapshot.reports = [report, ...this.snapshot.reports.filter((item) => item.taskId !== task.id)];
@@ -887,21 +891,21 @@ export class RealHermesBridge implements HermesBridgeApi {
   private reportForTask(task: Task, artifacts: Artifact[], finalOutput: string): ReportCard {
     const agent = this.snapshot.agents.find((item) => item.id === task.assigneeId);
     const profileGap = task.profileContext?.verified === false || agent?.executionRouting === 'unsupported'
-      ? `Selected profile ${agent?.name ?? task.profileContext?.profileName ?? task.assigneeId} was assigned in Guild, but Hermes execution routing is unavailable: ${task.profileContext?.unavailableReason ?? agent?.unavailableReason ?? this.profileRoutingReason()}.`
+      ? `Selected profile ${agent?.name ?? task.profileContext?.profileName ?? task.assigneeId} was assigned in Companion, but Hermes execution routing is unavailable: ${task.profileContext?.unavailableReason ?? agent?.unavailableReason ?? this.profileRoutingReason()}.`
       : undefined;
     const profileFact = task.profileContext?.verified
-      ? `Guild routed this quest to profile ${task.profileContext.profileName} through ${task.profileContext.routingSource} (${task.profileContext.routingMode}).`
-      : `Guild assigned this quest to profile ${this.agentName(task.assigneeId)}.`;
+      ? `Companion routed this message to profile ${task.profileContext.profileName} through ${task.profileContext.routingSource} (${task.profileContext.routingMode}).`
+      : `Companion assigned this message to profile ${this.agentName(task.assigneeId)}.`;
     return {
       id: id('report'),
       taskId: task.id,
       agentId: task.assigneeId,
-      title: `Quest Completed: ${task.title}`,
+      title: `Companion Response: ${task.title}`,
       summary: finalOutput,
       artifacts,
       facts: [
-        'Hermes API returned final output for this Guild quest.',
-        'Guild captured the API run result and converted it into this Quest Report Card.',
+        'Hermes API returned final output for this companion message.',
+        'Companion captured the API run result and converted it into this response.',
         profileFact,
       ],
       assumptions: ['Hermes API run.completed output is treated as final output for this bridge.'],
@@ -915,7 +919,7 @@ export class RealHermesBridge implements HermesBridgeApi {
   private promptForTask(task: Task) {
     if (task.type === 'pet') {
       return [
-        'Hermes Guild Pet Mode message:',
+        'Hermes Companion Pet Mode message:',
         task.brief,
         task.context ? `Context:\n${task.context}` : undefined,
       ]
@@ -924,7 +928,7 @@ export class RealHermesBridge implements HermesBridgeApi {
     }
 
     return [
-      'Hermes Guild quest brief:',
+      'Hermes Companion message brief:',
       task.brief,
       task.goals ? `Goals:\n${task.goals}` : undefined,
       task.nonGoals ? `Non-goals:\n${task.nonGoals}` : undefined,
@@ -938,15 +942,15 @@ export class RealHermesBridge implements HermesBridgeApi {
   private instructionsForTask(task: Task) {
     if (task.type === 'pet') {
       return [
-        'You are replying inside Hermes Guild Pet Mode.',
+        'You are replying inside Hermes Companion Pet Mode.',
         'Answer the user directly and conversationally.',
-        'Do not format the response as a Quest Report Card.',
+        'Do not format the response as a report.',
         'Do not reject short casual messages for lacking a task objective.',
         'If the user greets you, greet them back briefly and ask how you can help.',
       ].join(' ');
     }
 
-    return 'Return a concise final answer suitable for a Quest Report Card.';
+    return 'Return a concise final answer suitable for a Companion response.';
   }
 
   private timeline(taskId: string, agentId: string | undefined, type: TimelineEvent['type'], message: string, source: TimelineEvent['source']) {
@@ -1119,7 +1123,7 @@ export class RealHermesBridge implements HermesBridgeApi {
   }
 
   private titleFromBrief(brief: string) {
-    const firstLine = brief.trim().split('\n')[0] || 'Untitled quest';
+    const firstLine = brief.trim().split('\n')[0] || 'Untitled message';
     return firstLine.length > 56 ? `${firstLine.slice(0, 53)}...` : firstLine;
   }
 

@@ -14,18 +14,21 @@ interface HermesApiHttpResponse {
   body: string;
 }
 
+export type HermesApiRequestHeaders = Record<string, string>;
 type HermesApiInvoker = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
 export class FetchHermesApiClient implements HermesApiClient {
   private readonly baseUrl: string;
+  private readonly requestHeaders: HermesApiRequestHeaders;
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, requestHeaders: HermesApiRequestHeaders = {}) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
+    this.requestHeaders = requestHeaders;
   }
 
   async checkHealth(): Promise<HermesHealth> {
     try {
-      const response = await fetch(`${this.baseUrl}/health`);
+      const response = await fetch(`${this.baseUrl}/health`, { headers: this.headers() });
       const text = await response.text();
       return healthFromHttpResponse({ status: response.status, body: text }, this.baseUrl);
     } catch (error) {
@@ -113,7 +116,7 @@ export class FetchHermesApiClient implements HermesApiClient {
   async runTask(input: HermesApiRunTaskInput): Promise<HermesApiRunTaskResult> {
     const start = await fetch(`${this.baseUrl}/v1/runs`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.headers({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(runStartBody(input)),
     });
     const startBody = await start.json().catch(() => ({}));
@@ -137,7 +140,7 @@ export class FetchHermesApiClient implements HermesApiClient {
 
   private async readRunEvents(runId: string): Promise<HermesApiRunTaskResult> {
     try {
-      const response = await fetch(`${this.baseUrl}/v1/runs/${encodeURIComponent(runId)}/events`);
+      const response = await fetch(`${this.baseUrl}/v1/runs/${encodeURIComponent(runId)}/events`, { headers: this.headers() });
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
         return {
@@ -167,7 +170,7 @@ export class FetchHermesApiClient implements HermesApiClient {
     try {
       const response = await fetch(`${this.baseUrl}${path}`, {
         method,
-        headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
+        headers: this.headers(body === undefined ? undefined : { 'Content-Type': 'application/json' }),
         body: body === undefined ? undefined : JSON.stringify(body),
       });
       const text = await response.text();
@@ -176,13 +179,20 @@ export class FetchHermesApiClient implements HermesApiClient {
       return { ok: false, status: 0, error: `Hermes API request failed at ${this.baseUrl}${path}: ${messageFromUnknown(error)}` };
     }
   }
+
+  private headers(extra: HermesApiRequestHeaders = {}) {
+    const headers = { ...this.requestHeaders, ...extra };
+    return Object.keys(headers).length ? headers : undefined;
+  }
 }
 
 export class NativeHermesApiClient implements HermesApiClient {
   private readonly baseUrl: string;
+  private readonly requestHeaders: HermesApiRequestHeaders;
 
-  constructor(baseUrl: string, private readonly invokeCommand: HermesApiInvoker) {
+  constructor(baseUrl: string, private readonly invokeCommand: HermesApiInvoker, requestHeaders: HermesApiRequestHeaders = {}) {
     this.baseUrl = normalizeBaseUrl(baseUrl);
+    this.requestHeaders = requestHeaders;
   }
 
   async checkHealth(): Promise<HermesHealth> {
@@ -328,17 +338,24 @@ export class NativeHermesApiClient implements HermesApiClient {
   }
 
   private request(method: HermesApiHttpMethod, url: string, body?: unknown) {
-    return this.invokeCommand<HermesApiHttpResponse>('hermes_api_request', body === undefined ? { method, url } : { method, url, body });
+    const headers = Object.keys(this.requestHeaders).length ? this.requestHeaders : undefined;
+    const args: Record<string, unknown> = { method, url };
+    if (body !== undefined) args.body = body;
+    if (headers) args.headers = headers;
+    return this.invokeCommand<HermesApiHttpResponse>(
+      'hermes_api_request',
+      args,
+    );
   }
 }
 
-export async function createDefaultHermesApiClient(baseUrl: string): Promise<HermesApiClient> {
+export async function createDefaultHermesApiClient(baseUrl: string, requestHeaders: HermesApiRequestHeaders = {}): Promise<HermesApiClient> {
   if (isTauriRuntime()) {
     const { invoke } = await import('@tauri-apps/api/core');
-    return new NativeHermesApiClient(baseUrl, invoke);
+    return new NativeHermesApiClient(baseUrl, invoke, requestHeaders);
   }
 
-  return new FetchHermesApiClient(baseUrl);
+  return new FetchHermesApiClient(baseUrl, requestHeaders);
 }
 
 export type HermesApiHttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';

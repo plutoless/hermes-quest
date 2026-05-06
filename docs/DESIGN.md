@@ -63,9 +63,19 @@ Core behavior:
 - Toggle speech bubbles.
 - Toggle click-through behavior.
 - Select bridge mode: `mock`, `real`, or `auto`.
+- Select the Hermes connection target: Local or Managed.
+- Save or clear the Managed bearer token when Managed is selected.
 - Show provider/bridge status in clear language.
 
 Real mode must fail visibly when Hermes is unavailable. Auto mode may fall back to mock behavior, but the UI must say that it is using local mock output.
+
+Bridge mode and connection target are separate. Bridge mode controls whether the provider is mock, real, or auto fallback. Connection target controls where real Hermes API calls go:
+
+- Local uses the local Hermes API and defaults to `http://127.0.0.1:8642`.
+- Managed uses the build-configured `VITE_HERMES_MANAGED_API_BASE_URL` and the locally saved bearer token.
+- Custom server is reserved in the configuration schema for later and is intentionally not exposed in the first Settings UI pass.
+
+When Managed has no configured URL or no token, Settings and provider status should state that requirement and the bridge should not send Hermes API requests.
 
 ### Chat
 

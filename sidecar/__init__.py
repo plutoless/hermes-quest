@@ -1,2 +1,2 @@
-"""Hermes Guild sidecar package."""
+"""Hermes Companion sidecar package."""
 
