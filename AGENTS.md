@@ -1,171 +1,50 @@
-# Hermes Guild Agent Instructions
+# Hermes Companion Agent Instructions
 
 ## Product Direction
 
-Hermes Guild is a desktop-native RPG workbench for AI agents. It is not a generic admin dashboard with fantasy styling. The product should make Hermes agents feel playable, assignable, reviewable, and maintainable while preserving serious work workflows.
+Hermes Companion is a desktop-native companion app for Hermes. The product centers on lightweight desktop companions that can remain visible while the user works, open quick chat, and route messages through Hermes when available.
 
-The core framing is:
-
-- **Pet Mode**: one active desktop companion in v0 for profile-specific communication, task status, and return reports. Multiple simultaneous pets are v0.5.
-- **Guild Hall Mode**: a focused dashboard for managing profiles, quests, task details, and review.
-
-Use the working product name **Hermes Guild** unless the user chooses otherwise.
+The current product should be treated as a desktop companion app.
 
 Primary product spec: `docs/DESIGN.md`.
 
-Implementation reference brief: `docs/REFERENCES.md`.
+## Current Scope
 
-## Non-Negotiable Principles
+- Floating transparent desktop companion windows.
+- Companion picker and multiple visible companion instances.
+- Appearance controls for name, visibility, size, animation, and visual source state.
+- Settings controls for dragging, speech bubbles, click-through behavior, and bridge mode.
+- Chat from the companion through mock, real, or auto provider modes.
+- Hermes bridge availability surfaced honestly.
+- Native Tauri windows for the main companion, pet route, appearance panel, companions panel, and settings panel.
 
-- RPG concepts must map to real Hermes state or behavior. Avoid fake stats, decorative levels, or card UI that does not represent useful data.
-- Mock data is test-only. It may be used in unit tests, development fixtures, and explicit test harnesses, but it must not be a normal product/runtime fallback. If Hermes data is unavailable, show a clear unavailable/error state instead of silently substituting mock data.
-- The game layer is an interaction model, not just a skin. In v0, it should make task assignment, progress tracking, and review easier.
-- Workflows stay efficient and serious. Do not add map traversal, cutscenes, or heavy game ceremony that slows down work.
-- Pet Mode must be high-frequency useful: one active profile pet in v0, quick input, status feedback, progress report, open Guild Hall, and task return cards.
-- Review is a first-class workflow. Hermes saying "done" is not enough; users need approve, revise, and traceability.
-- Handoff/Tavern is part of the broader product identity, but it must not be built before the core task/review loop works.
+## Out Of Scope
 
-## RPG To Hermes Mapping
+Do not expand the product beyond the current companion surface unless the user explicitly changes direction.
 
-Use this mapping consistently across product, UI, and implementation:
+Specifically avoid adding dashboard workflows, decorative progression systems, task-management surfaces, provider-management pages, automatic routing, queues, or group chat.
 
-| RPG concept | Hermes concept |
-| --- | --- |
-| Character / badge | Profile / Agent |
-| Class | Agent role, such as Researcher, Reviewer, Ops, Writer, Doctor |
-| Skill card | Hermes skill |
-| Traits | Configured role strengths, constraints, and later performance signals |
-| Equipment | Model, tool permissions, data sources, workspace |
-| Quest | User task |
-| Raid | Long-running or multi-agent task |
-| Battle log | Task timeline / execution trace |
-| XP | Completed tasks, success rate, adopted outputs, user ratings |
-| HP / condition | System health, load, availability |
-| Energy | Context budget, attention, queue load |
-| Tavern | Handoff area |
-| Infirmary | Logs, diagnostics, provider/gateway health |
-| Archive / Library | Memory, docs, decision log, historical tasks |
-| Quest Board | Task intake and tracking |
-
-## Traits Before Stats
-
-For v0, do not present preset values as measured performance stats. Use **Traits**, **Affinity**, or **Role Profile** language.
-
-Prefer semi-game, semi-real trait dimensions:
-
-- Planning
-- Execution
-- Research
-- Judgement
-- Reliability
-- Speed
-- Context Discipline
-- Communication
-
-For v0, traits should come from simple profile presets and be marked as configured signals. Later versions can derive real stats from task history, user ratings, success rate, rework rate, and drift/blockage signals.
-
-## Recommended Stack
-
-For v0, prefer:
-
-- Tauri 2 for the native desktop shell, transparent windows, tray, always-on-top behavior, global shortcuts, local filesystem access, sidecars, and notifications.
-- React for dashboard UI and business workflows.
-- PixiJS, Rive, Lottie, or similar for character animation and 2D game-feel.
-- Framer Motion for lightweight UI transitions and interaction polish.
-- A Hermes Bridge / Adapter layer between the UI and Hermes internals.
-
-Do not choose Godot for v0 unless the user explicitly redirects the product toward a more game-native implementation. Web UI speed and Hermes integration matter more for the first version.
-
-## MVP Priority
-
-Build v0 around one complete loop:
-
-1. User launches one active desktop pet.
-2. User selects the active Hermes profile for that pet.
-3. User talks to the pet, which routes the message or task to that active profile by default.
-4. The message creates a quest assigned to that profile.
-5. Guild Hall shows the task in progress.
-6. Task detail records assignment, progress, artifacts, and errors.
-7. Completed work appears in Review as a Quest Report Card.
-8. User approves or asks for revision.
-
-The hard v0 chain is:
-
-> Pet entry -> profile assignment -> quest execution -> timeline visibility -> report card review.
-
-Multiple desktop pets, unassigned queue, preferred assignment, and automatic claim are v0.5 features. Do not let them delay the core task/review loop.
-
-Initial pages:
-
-- Guild Hall / Home
-- Quest Board
-- Review
-
-Agents / Characters can start as a section inside Guild Hall. A dedicated page is v0.5 unless profile management becomes necessary earlier.
-
-Later pages:
-
-- Tavern / Handoff
-- Skill Deck
-- Infirmary
-- Archive / Library
+Mock data must not be used as an invisible production fallback in real mode.
 
 ## Implementation Guardrails
 
-- Keep v0 small: one active desktop pet, profile switcher, three profile cards, Quest Board, task detail, and review.
-- The desktop pet maps to the active Hermes profile and must show that profile's real status.
-- Pet-created tasks are assigned to the active profile by default.
-- Quest Board tasks must support direct assignment only in v0. Preferred profile/role, unassigned queue, and automatic pickup are v0.5.
-- Use a Hermes Bridge API that exposes game-friendly objects instead of letting UI components depend directly on low-level Hermes internals.
-- Use a shared event source for live status. v0 may start with a local bridge event emitter before WebSocket/SSE is warranted. Pet Mode and Guild Hall should react to the same task and system events.
-- Represent assumptions separately from facts in reviews.
-- Do not add decorative features, Tavern, Skill Deck, Infirmary, XP, loot, party quests, voice, complex pet animations, or complex auto-scheduling before the task/review loop works.
-- When designing UI, favor dense, readable operational surfaces with RPG accents over oversized marketing layouts.
-- Desktop pet animations should correspond to actual states: idle, thinking, running, blocked, needs review, and error.
-- Quest creation should stay lightweight: one main task input, with goals, non-goals, context, and definition of done behind an advanced disclosure.
-- Quest Report Card is the core reward loop. Rewards must map to real work objects: summary document, handoff card, decision, risk warning, open question, artifact, or follow-up task.
+- Keep the first screen focused on the usable companion experience, not a landing page.
+- Preserve the desktop-native behavior: transparent windows, draggable companion surface, compact controls, and always-on-top utility.
+- Companion UI should be lightweight and direct. Avoid decorative ceremony that slows down chat or window management.
+- If Hermes is unavailable, show clear bridge/provider status instead of pretending real Hermes output exists.
+- Keep mock behavior explicit in copy, tests, and development harnesses.
+- Use existing React, Tauri, bridge, and styling patterns before adding new abstractions.
+- Keep changes scoped to the companion product unless the user explicitly asks for a broader code rename or architecture migration.
 
-## Hermes Integration Reality
+## Naming
 
-Before treating an RPG state as real, identify its source:
+Use these terms consistently:
 
-- Guild-maintained state: active profile, desktop position, task brief/goals/non-goals, direct assignment, review status, approve/revise actions, and user-facing timeline records.
-- Hermes-provided or bridge-derived state: profile identity, active session, execution logs, model/tool errors, artifact path, completion signal, and profile availability.
-- Guild-generated state: Quest Report Card, facts/assumptions/known gaps, trait display, quest summary, and timeline normalization.
+- Product: Hermes Companion.
+- Desktop entity: companion.
+- Management surface: Companions panel.
+- Visual controls: Appearance panel.
+- Runtime controls: Settings panel.
+- Provider modes: mock, real, auto.
 
-For Hermes-derived information, use this source precedence:
-
-1. Public official Hermes REST APIs.
-2. Hermes CLI.
-3. Safe local Hermes state.
-4. Hermes Guild Python sidecar.
-5. Guild-owned workflow state where the surface is truly owned by Guild.
-6. Unavailable with a concrete reason.
-
-Mock is not part of production source precedence. Keep mock behind tests, fixtures, and explicit development harnesses only.
-
-Selected-profile execution follows the same order. Public REST routing is preferred when Hermes advertises it. If REST lacks profile routing, a verified CLI route such as `hermes -p <profile> -z <prompt>` may be used through the loopback Guild sidecar. Never use `hermes profile use` or patch Hermes source to route a single task.
-
-If Hermes does not expose a signal yet, either route it through the bridge as a clearly derived state or leave the feature out of v0. Avoid UI that appears live but is not grounded in Hermes or Guild-owned state.
-
-## Suggested Domain Objects
-
-Frontend-facing objects should remain stable and game-readable:
-
-- `Agent`: id, name, class/role, status, availability, active pet state, current task, skills, traits, health, equipment, last report.
-- `Task`: id, title, assignee, brief, type, state, progress, artifacts, timeline, review status.
-- `Skill`: id, name, rarity/category, description, trigger, cooldown or usage limits, enabled state.
-- `SystemStatus`: gateway status, provider health, logs summary, warnings.
-
-Key events:
-
-- `task_started`
-- `task_progress`
-- `task_blocked`
-- `task_completed`
-- `review_required`
-- `review_approved`
-- `revision_requested`
-- `gateway_error`
-- `agent_idle`
-- `active_profile_changed`
+Avoid old terms in active docs and UI copy unless referring to historical code names that have not yet been migrated.
