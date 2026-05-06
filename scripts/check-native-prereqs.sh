@@ -29,15 +29,53 @@ check_pkg() {
   fi
 }
 
+check_xcode_tools() {
+  if xcode-select -p >/dev/null 2>&1; then
+    printf 'ok: Xcode Command Line Tools found\n'
+  else
+    printf 'missing: Xcode Command Line Tools\n'
+    missing=1
+  fi
+}
+
 check_command cargo
 check_command rustc
 check_command rustup
-check_command pkg-config
-check_pkg webkit2gtk-4.1
-check_pkg librsvg-2.0
+
+case "$(uname -s)" in
+  Darwin)
+    check_xcode_tools
+    ;;
+  Linux)
+    check_command pkg-config
+    check_pkg webkit2gtk-4.1
+    check_pkg librsvg-2.0
+    ;;
+  *)
+    printf 'warning: unsupported OS for native prerequisite checks: %s\n' "$(uname -s)"
+    ;;
+esac
 
 if [ "$missing" -ne 0 ]; then
-  cat <<'EOF'
+  if [ "$(uname -s)" = "Darwin" ]; then
+    cat <<'EOF'
+
+Native Tauri prerequisites are incomplete.
+
+macOS setup:
+  xcode-select --install
+  brew install rustup-init
+  rustup-init -y
+
+Then open a new shell or source Cargo's environment:
+  source "$HOME/.cargo/env"
+
+Then rerun:
+  bun run check:native
+  bun run tauri:dev
+EOF
+  else
+    cat <<'EOF'
 
 Native Tauri prerequisites are incomplete.
 
@@ -49,6 +87,7 @@ Then rerun:
   bun run check:native
   bun run tauri:dev
 EOF
+  fi
   exit 1
 fi
 

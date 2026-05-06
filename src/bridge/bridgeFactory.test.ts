@@ -232,6 +232,88 @@ describe('bridgeFactory', () => {
     expect(bridge.getSnapshot().agents.map((agent) => agent.name)).toEqual(['Profile unavailable']);
   });
 
+  test('real mode uses CLI profiles when Hermes REST health is unavailable', async () => {
+    const cliRuns: unknown[] = [];
+    const bridge = await createBridgeFromConfig({ ...defaultConfig, bridgeMode: 'real' }, {
+      apiClient: {
+        checkHealth: async () => ({ ok: false, message: 'Hermes API refused connection' }),
+        runTask: async () => {
+          throw new Error('gateway should not run');
+        },
+      },
+      profileRunClient: {
+        runTask: async (input) => {
+          cliRuns.push(input);
+          return {
+            ok: true,
+            output: 'CLI profile output.',
+            events: [{ event: 'run.completed', output: 'CLI profile output.' }],
+            profileContext: {
+              profileId: input.profile?.id ?? 'default',
+              profileName: input.profile?.name ?? 'default',
+              source: 'cli',
+              routingSource: 'cli',
+              routingMode: 'cli',
+              sessionId: input.sessionId,
+              verified: true,
+            },
+          };
+        },
+      },
+      profileClient: profileClient({
+        source: 'cli',
+        activeProfileId: 'default',
+        executionRouting: 'supported',
+        executionRoutingSource: 'cli',
+        executionRoutingMode: 'cli',
+        executionRoutingReason: 'Verified CLI route.',
+        profiles: [{ id: 'default', name: 'default', source: 'cli', executionRouting: 'supported' }],
+      }),
+    });
+
+    const snapshot = bridge.getSnapshot();
+    expect(snapshot.systemStatus.activeImplementation).toBe('real');
+    expect(snapshot.systemStatus.hermesAvailable).toBe('available');
+    expect(snapshot.systemStatus.dataSources?.profiles).toBe('cli');
+    expect(snapshot.systemStatus.dataSources?.profileRouting).toBe('cli');
+    expect(snapshot.agents.map((agent) => agent.id)).toEqual(['default']);
+    expect(snapshot.agents[0]).toMatchObject({ name: 'default', source: 'cli', executionRouting: 'supported' });
+
+    const taskId = bridge.createTask({ brief: 'Use installed Hermes CLI profile.', assigneeId: 'default', type: 'pet' });
+    await wait(20);
+    const task = bridge.getSnapshot().tasks.find((item) => item.id === taskId);
+    expect(cliRuns).toHaveLength(1);
+    expect(task?.profileContext?.routingSource).toBe('cli');
+    expect(task?.profileContext?.profileName).toBe('default');
+  });
+
+  test('auto mode uses CLI profiles when Hermes REST health is unavailable', async () => {
+    const bridge = await createBridgeFromConfig(defaultConfig, {
+      apiClient: {
+        checkHealth: async () => ({ ok: false, message: 'Hermes API refused connection' }),
+        runTask: async () => {
+          throw new Error('gateway should not run');
+        },
+      },
+      profileClient: profileClient({
+        source: 'cli',
+        activeProfileId: 'default',
+        executionRouting: 'supported',
+        executionRoutingSource: 'cli',
+        executionRoutingMode: 'cli',
+        executionRoutingReason: 'Verified CLI route.',
+        profiles: [{ id: 'default', name: 'default', source: 'cli', executionRouting: 'supported' }],
+      }),
+    });
+
+    const snapshot = bridge.getSnapshot();
+    expect(snapshot.systemStatus.bridgeMode).toBe('auto');
+    expect(snapshot.systemStatus.activeImplementation).toBe('real');
+    expect(snapshot.systemStatus.hermesAvailable).toBe('available');
+    expect(snapshot.activeProfileId).toBe('default');
+    expect(snapshot.agents[0]?.source).toBe('cli');
+  });
+
   test('auto mode uses real bridge when Hermes health passes without requiring protected dashboard REST', async () => {
     const apiClient: HermesApiClient = {
       checkHealth: async () => ({ ok: true, message: 'Hermes API healthy' }),
@@ -1004,7 +1086,7 @@ describe('bridgeFactory', () => {
     expect(snapshot.agents.map((agent) => agent.name)).not.toContain('Brass');
   });
 
-  test('real mode completes a pet task through the Hermes API into a reviewable report card', async () => {
+  test('real mode completes a pet task through the Hermes API as normal chat', async () => {
     const calls: Array<{ input: string; instructions?: string; sessionId?: string }> = [];
     const apiClient: HermesApiClient = {
       checkHealth: async () => ({ ok: true, message: 'Hermes API healthy' }),
@@ -1038,13 +1120,50 @@ describe('bridgeFactory', () => {
     expect(activeAgent?.id).toBe('profile-unavailable');
     expect(calls).toHaveLength(1);
     expect(calls[0].input).toContain('Write a real bridge smoke report.');
+    expect(calls[0].input).toContain('Hermes Guild Pet Mode message:');
+    expect(calls[0].input).not.toContain('Hermes Guild quest brief:');
+    expect(calls[0].instructions).toContain('Pet Mode');
+    expect(calls[0].instructions).not.toContain('suitable for a Quest Report Card');
+    expect(calls[0].sessionId).toBe(taskId);
+    expect(task?.state).toBe('completed');
+    expect(task?.reviewStatus).toBe('none');
+    expect(task?.timeline.some((event) => event.source === 'hermes' && event.type === 'completed')).toBe(true);
+    expect(task?.timeline.some((event) => event.type === 'review_required')).toBe(false);
+    expect(report).toBeUndefined();
+    expect(snapshot.agents.find((agent) => agent.id === task?.assigneeId)?.status).toBe('idle');
+    expect(snapshot.systemStatus.hermesApiBaseUrl).toBe('http://127.0.0.1:8642');
+  });
+
+  test('real mode keeps Quest Board tasks on the Quest Report Card contract', async () => {
+    const calls: Array<{ input: string; instructions?: string; sessionId?: string }> = [];
+    const apiClient: HermesApiClient = {
+      checkHealth: async () => ({ ok: true, message: 'Hermes API healthy' }),
+      runTask: async ({ input, instructions, sessionId }) => {
+        calls.push({ input, instructions, sessionId });
+        return {
+          ok: true,
+          output: 'Quest completed from Hermes API.',
+          events: [{ event: 'run.completed', output: 'Quest completed from Hermes API.' }],
+        };
+      },
+    };
+    const bridge = await createBridgeFromConfig({ ...defaultConfig, bridgeMode: 'real' }, { apiClient });
+
+    const taskId = bridge.createTask({
+      brief: 'Draft a release checklist.',
+      goals: 'Cover test, build, and rollout checks.',
+      assigneeId: bridge.getSnapshot().activeProfileId,
+      type: 'quest_board',
+    });
+
+    await wait(20);
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0].input).toContain('Hermes Guild quest brief:');
+    expect(calls[0].input).toContain('Draft a release checklist.');
+    expect(calls[0].input).toContain('Goals:\nCover test, build, and rollout checks.');
     expect(calls[0].instructions).toContain('Quest Report Card');
     expect(calls[0].sessionId).toBe(taskId);
-    expect(task?.state).toBe('needs_review');
-    expect(task?.timeline.some((event) => event.source === 'hermes' && event.type === 'completed')).toBe(true);
-    expect(report?.summary).toContain('Final answer from Hermes API');
-    expect(report?.facts).toContain('Hermes API returned final output for this Guild quest.');
-    expect(snapshot.systemStatus.hermesApiBaseUrl).toBe('http://127.0.0.1:8642');
   });
 
   test('real mode ignores configured real profile name and uses API profile metadata', async () => {

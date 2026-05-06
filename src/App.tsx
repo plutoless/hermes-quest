@@ -2,31 +2,37 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, FormEvent, MouseEvent, PointerEvent } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import {
-  Bell,
   ChevronRight,
+  CircleAlert,
   Edit3,
-  Eye,
   Feather,
-  Grid2X2,
+  Gauge,
   Hand,
   Image as ImageIcon,
+  MapPin,
   MessageCircle,
   Moon,
+  MousePointer2,
+  Move,
+  Pin,
   Plus,
+  Power,
   Send,
   Settings,
-  Shield,
   Sparkles,
   Upload,
   UserRound,
+  Wifi,
   WifiOff,
   X,
 } from 'lucide-react';
 import { useBridgeSnapshot } from './hooks/useBridgeSnapshot';
 import type {
+  Agent,
   AnimationState,
   AppearanceSource,
   AppSettings,
+  BridgeSnapshot,
   ChatMessage,
   ChatProvider,
   Companion,
@@ -39,14 +45,16 @@ import type { BridgeMode } from './bridge/types';
 const companionStateStorageKey = 'hermes-desktop.companion-state.v0';
 const hermesCharacterUrl = new URL('./assets/hermes-character.png', import.meta.url).href;
 const portraitFrameUrls = [
-  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_32 AM (1).png', import.meta.url).href,
-  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_32 AM (2).png', import.meta.url).href,
-  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_33 AM (3).png', import.meta.url).href,
-  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_33 AM (4).png', import.meta.url).href,
-  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_33 AM (5).png', import.meta.url).href,
-  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_34 AM (6).png', import.meta.url).href,
-  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_34 AM (7).png', import.meta.url).href,
-  new URL('../portrait/ChatGPT Image May 6, 2026, 03_13_35 AM (8).png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-01.png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-02.png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-03.png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-04.png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-05.png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-06.png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-07.png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-08.png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-09.png', import.meta.url).href,
+  new URL('../portrait/v2-transparent/frame-10.png', import.meta.url).href,
 ];
 
 type ProviderMode = 'mock' | 'hermes';
@@ -63,7 +71,6 @@ interface CompanionRuntimeState {
 interface CompanionChatProviderOptions {
   mode: ProviderMode;
   bridge?: HermesBridgeApi;
-  waitTimeoutMs?: number;
   pollIntervalMs?: number;
 }
 
@@ -78,7 +85,7 @@ function getDefaultFrameUrls() {
 }
 
 function hydrateAppearanceFrames(appearance: CompanionAppearance): CompanionAppearance {
-  if (appearance.frameUrls?.length) return appearance;
+  if (appearance.frameUrls?.length && !(appearance.id === 'hermes-default' && appearance.source === 'preset')) return appearance;
   const frameUrls = getDefaultFrameUrls();
   return {
     ...appearance,
@@ -88,7 +95,7 @@ function hydrateAppearanceFrames(appearance: CompanionAppearance): CompanionAppe
     frameWidth: 1254,
     frameHeight: 1254,
     framesPerRow: frameUrls.length,
-    fps: { idle: 5, talk: 8, think: 6, wave: 10 },
+    fps: { idle: 2.5, talk: 4, think: 3, wave: 5 },
   };
 }
 
@@ -96,6 +103,11 @@ function getPanelWindow(): PanelWindow | null {
   if (typeof window === 'undefined') return null;
   const panel = new URLSearchParams(window.location.search).get('panel');
   return panel === 'appearance' || panel === 'companions' || panel === 'settings' ? panel : null;
+}
+
+function getRouteCompanionId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return new URLSearchParams(window.location.search).get('companion');
 }
 
 async function showPanelWindow(panel: PanelWindow) {
@@ -119,6 +131,28 @@ async function hidePanelWindow(panel: PanelWindow) {
   }
 
   window.close();
+}
+
+async function showCompanionWindow(companionId: string) {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('show_companion_window', { companionId });
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set('mode', 'pet');
+  url.searchParams.set('companion', companionId);
+  url.searchParams.delete('panel');
+  window.open(`${url.pathname}${url.search}${url.hash}`, `hermes-companion-${companionId}`, 'popup,width=460,height=420');
+}
+
+async function hideCompanionWindow(companionId: string) {
+  if (typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window) {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('hide_companion_window', { companionId });
+    return;
+  }
 }
 
 function startNativeWindowDrag() {
@@ -149,6 +183,22 @@ const mockResponses = [
   'I can stay on your desktop while you work.',
   'Got it. I can help with that.',
 ];
+
+const avatarBubbleMaxLength = 68;
+
+function isLongAssistantMessage(message: string) {
+  return message.length > avatarBubbleMaxLength || message.includes('\n');
+}
+
+function getAvatarBubbleCopy(message: string, status: CompanionStatus) {
+  if (status === 'thinking') return 'Thinking...';
+  if (!message.trim()) return '';
+  return isLongAssistantMessage(message) ? 'I wrote a reply. Open chat to view.' : message;
+}
+
+function getUnreadAssistantCount(messages: ChatMessage[]) {
+  return Math.max(0, messages.filter((message) => message.role === 'assistant').length - 1);
+}
 
 export function addCompanion(state: CompanionRuntimeState): CompanionRuntimeState {
   const next = cloneCompanionState(state);
@@ -220,6 +270,84 @@ function sanitizeCompanion(companion: Companion): Companion {
   };
 }
 
+function sourceLabel(source: string | undefined) {
+  if (!source) return 'Hermes profile';
+  return source.split('-').map((part) => part ? `${part[0].toUpperCase()}${part.slice(1)}` : part).join(' ');
+}
+
+function descriptionForAgent(agent: Agent) {
+  if (agent.source === 'unavailable' || agent.availability === 'offline' || agent.executionRouting === 'unsupported') {
+    return agent.unavailableReason ?? agent.health ?? 'Hermes profile is unavailable.';
+  }
+  return `${sourceLabel(agent.source)} profile · ${agent.executionRouting === 'supported' ? 'routing supported' : 'routing unknown'}`;
+}
+
+export function companionAgentId(companion: Companion) {
+  return companion.agent?.agentId ?? companion.id;
+}
+
+export function syncCompanionsWithBridgeProfiles(
+  state: CompanionRuntimeState,
+  snapshot: BridgeSnapshot,
+  providerMode: ProviderMode,
+): CompanionRuntimeState {
+  if (providerMode !== 'hermes' || snapshot.systemStatus.activeImplementation !== 'real') return state;
+  if (!snapshot.agents.length) return state;
+
+  const currentByAgentId = new Map(state.companions.map((companion) => [companionAgentId(companion), companion]));
+  const defaultAppearanceId = state.appearances[0]?.id ?? 'hermes-default';
+  const companions = snapshot.agents.map((agent, index) => {
+    const current = currentByAgentId.get(agent.id);
+    const visible = current?.visible ?? agent.activeInPet ?? index === 0;
+    return sanitizeCompanion({
+      id: agent.id,
+      name: agent.name,
+      description: descriptionForAgent(agent),
+      visible,
+      status: visible ? (current?.status === 'hidden' ? 'idle' : current?.status ?? statusFromAgent(agent)) : 'hidden',
+      appearanceId: current?.appearanceId ?? defaultAppearanceId,
+      position: current?.position ?? { x: 50, y: 54 },
+      scale: current?.scale ?? 1,
+      behavior: {
+        allowDrag: current?.behavior.allowDrag ?? state.settings.allowDragging,
+        showSpeechBubbles: current?.behavior.showSpeechBubbles ?? state.settings.showSpeechBubbles,
+        idleAtScreenEdge: current?.behavior.idleAtScreenEdge,
+        clickThrough: current?.behavior.clickThrough ?? state.settings.clickThrough,
+      },
+      agent: {
+        agentId: agent.id,
+        provider: agent.source ?? snapshot.systemStatus.activeImplementation,
+        source: agent.source,
+        executionRouting: agent.executionRouting,
+        unavailableReason: agent.unavailableReason,
+      },
+    });
+  });
+
+  const selectedCompanionId = companions.some((companion) => companion.id === state.selectedCompanionId)
+    ? state.selectedCompanionId
+    : snapshot.activeProfileId && companions.some((companion) => companion.id === snapshot.activeProfileId)
+      ? snapshot.activeProfileId
+      : companions[0].id;
+
+  const next = {
+    ...state,
+    companions,
+    selectedCompanionId,
+  };
+
+  return JSON.stringify(next.companions) === JSON.stringify(state.companions) && next.selectedCompanionId === state.selectedCompanionId
+    ? state
+    : next;
+}
+
+function statusFromAgent(agent: Agent): CompanionStatus {
+  if (agent.availability === 'offline') return 'away';
+  if (agent.status === 'thinking' || agent.status === 'running') return 'thinking';
+  if (agent.status === 'needs_review') return 'talking';
+  return agent.status === 'error' ? 'talking' : 'idle';
+}
+
 export function createInitialCompanionState(): CompanionRuntimeState {
   const frameUrls = getDefaultFrameUrls();
   const defaultAppearance: CompanionAppearance = {
@@ -233,7 +361,7 @@ export function createInitialCompanionState(): CompanionRuntimeState {
     frameHeight: 1254,
     rows: { idle: 0, talk: 1, think: 2, wave: 3 },
     framesPerRow: frameUrls.length,
-    fps: { idle: 5, talk: 8, think: 6, wave: 10 },
+    fps: { idle: 2.5, talk: 4, think: 3, wave: 5 },
     background: { type: 'transparent' },
   };
 
@@ -324,7 +452,6 @@ export function getNextAnimationState(event: CompanionEvent): AnimationState {
 export function createCompanionChatProvider({
   mode,
   bridge,
-  waitTimeoutMs = 30_000,
   pollIntervalMs = 250,
 }: CompanionChatProviderOptions): ChatProvider {
   if (mode === 'mock') {
@@ -354,7 +481,10 @@ export function createCompanionChatProvider({
       }
 
       const snapshot = bridge.getSnapshot();
-      const companionAgent = snapshot.agents.find((agent) => agent.activeInPet) ?? snapshot.agents[0];
+      const companionAgent =
+        snapshot.agents.find((agent) => agent.id === input.companionId) ??
+        snapshot.agents.find((agent) => agent.activeInPet) ??
+        snapshot.agents[0];
       if (!companionAgent || companionAgent.availability === 'offline') {
         throw new Error('Hermes bridge is unavailable for companion chat.');
       }
@@ -362,7 +492,7 @@ export function createCompanionChatProvider({
       const taskId = bridge.submitTask
         ? await bridge.submitTask({ brief: prompt, assigneeId: companionAgent.id, type: 'pet' })
         : bridge.createTask({ brief: prompt, assigneeId: companionAgent.id, type: 'pet' });
-      const content = await waitForBridgeOutput(bridge, taskId, waitTimeoutMs, pollIntervalMs);
+      const content = await waitForBridgeOutput(bridge, taskId, pollIntervalMs);
 
       return {
         role: 'assistant',
@@ -376,24 +506,26 @@ export function createCompanionChatProvider({
 async function waitForBridgeOutput(
   bridge: HermesBridgeApi,
   taskId: string,
-  waitTimeoutMs: number,
   pollIntervalMs: number,
 ): Promise<string> {
-  const startedAt = Date.now();
-
-  while (Date.now() - startedAt <= waitTimeoutMs) {
+  for (;;) {
     const snapshot = bridge.getSnapshot();
+    const task = bridge.getTask ? await bridge.getTask(taskId) : snapshot.tasks.find((item) => item.id === taskId);
+    const completedMessage = [...(task?.timeline ?? [])]
+      .reverse()
+      .find((event) => event.type === 'completed' && event.source === 'hermes')
+      ?.message
+      .trim();
+    if (completedMessage) return completedMessage;
+
     const report = snapshot.reports.find((item) => item.taskId === taskId);
     if (report?.summary.trim()) return report.summary;
 
-    const task = bridge.getTask ? await bridge.getTask(taskId) : snapshot.tasks.find((item) => item.id === taskId);
     if (task?.error?.trim()) return task.error;
     if (task?.state === 'error') return 'Hermes could not complete that.';
 
     await new Promise((resolve) => globalThis.setTimeout(resolve, pollIntervalMs));
   }
-
-  throw new Error('Hermes bridge did not finish the companion chat before the timeout.');
 }
 
 function loadCompanionState(): CompanionRuntimeState {
@@ -432,6 +564,7 @@ function statusToAnimation(status: CompanionStatus): AnimationState {
 
 function App() {
   const panelWindow = getPanelWindow();
+  const routeCompanionId = getRouteCompanionId();
   const { bridge, bridgeReady, bridgeConfig, snapshot } = useBridgeSnapshot();
   const [runtime, setRuntime] = useState<CompanionRuntimeState>(() => loadCompanionState());
   const [draftMessage, setDraftMessage] = useState('');
@@ -446,7 +579,8 @@ function App() {
   const [animation, setAnimation] = useState<AnimationState>('idle');
   const [avatarFrameIndex, setAvatarFrameIndex] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
-  const [chatOpen, setChatOpen] = useState(false);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [quickInputOpen, setQuickInputOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
   const dragStart = useRef<{ x: number; y: number } | null>(null);
@@ -455,6 +589,12 @@ function App() {
   useEffect(() => {
     persistCompanionState(runtime);
   }, [runtime]);
+
+  const providerMode = getCompanionProviderMode(bridgeConfig.bridgeMode, snapshot.systemStatus.hermesAvailable);
+
+  useEffect(() => {
+    setRuntime((current) => syncCompanionsWithBridgeProfiles(current, snapshot, providerMode));
+  }, [providerMode, snapshot]);
 
   useEffect(() => {
     const handleStorage = (event: StorageEvent) => {
@@ -473,12 +613,27 @@ function App() {
     return () => window.removeEventListener('pointerdown', closeContextMenu);
   }, [contextMenu]);
 
-  const selectedCompanion = runtime.companions.find((companion) => companion.id === runtime.selectedCompanionId) ?? runtime.companions[0];
+  useEffect(() => {
+    if (!drawerOpen) return undefined;
+    const closeDrawerOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setDrawerOpen(false);
+    };
+    window.addEventListener('keydown', closeDrawerOnEscape);
+    return () => window.removeEventListener('keydown', closeDrawerOnEscape);
+  }, [drawerOpen]);
+
+  const selectedCompanionId = routeCompanionId ?? runtime.selectedCompanionId;
+  const selectedCompanion = runtime.companions.find((companion) => companion.id === selectedCompanionId) ?? runtime.companions[0];
   const selectedAppearance = runtime.appearances.find((appearance) => appearance.id === selectedCompanion.appearanceId) ?? runtime.appearances[0];
   const activeFrameUrls = selectedAppearance.frameUrls?.length ? selectedAppearance.frameUrls : [selectedAppearance.spriteSheetUrl];
   const activeAvatarFrameUrl = activeFrameUrls[avatarFrameIndex % activeFrameUrls.length] ?? selectedAppearance.spriteSheetUrl;
   const activeMessage = [...messages].reverse().find((message) => message.role === 'assistant');
-  const providerMode = getCompanionProviderMode(bridgeConfig.bridgeMode, snapshot.systemStatus.hermesAvailable);
+  const bubbleCopy = getAvatarBubbleCopy(activeMessage?.content ?? '', selectedCompanion.status);
+  const shouldShowBubble = runtime.settings.showSpeechBubbles && !runtime.settings.quietMode && !drawerOpen && (
+    selectedCompanion.status === 'thinking' || selectedCompanion.status === 'talking'
+  );
+  const unreadAssistantCount = getUnreadAssistantCount(messages);
+  const drawerSide = selectedCompanion.position.x > 55 ? 'right' : 'left';
   const provider = useMemo(
     () => createCompanionChatProvider({ mode: providerMode, bridge: bridgeReady ? bridge : undefined }),
     [bridge, bridgeReady, providerMode],
@@ -506,9 +661,10 @@ function App() {
   };
 
   const updateSelectedCompanion = (patch: Partial<Companion>) => {
+    const targetId = selectedCompanion.id;
     updateRuntime((state) => {
       state.companions = state.companions.map((companion) => (
-        companion.id === state.selectedCompanionId ? { ...companion, ...patch } : companion
+        companion.id === targetId ? { ...companion, ...patch } : companion
       ));
     });
   };
@@ -520,15 +676,15 @@ function App() {
   const handleCompanionClick = () => {
     setAnimation(getNextAnimationState('click'));
     setSelectedStatus('idle');
-    setChatOpen((open) => !open);
+    setQuickInputOpen((open) => !open);
     window.setTimeout(() => setAnimation('idle'), 900);
   };
 
   const handleCompanionContextMenu = (event: MouseEvent<HTMLButtonElement>) => {
     event.preventDefault();
     setContextMenu({
-      x: Math.min(window.innerWidth - 180, event.clientX),
-      y: Math.min(window.innerHeight - 160, event.clientY),
+      x: Math.max(8, Math.min(window.innerWidth - 180, event.clientX)),
+      y: Math.max(8, Math.min(window.innerHeight - 160, event.clientY)),
     });
   };
 
@@ -593,12 +749,14 @@ function App() {
     event.preventDefault();
     const content = draftMessage.trim();
     if (!content) return;
+    const submittedFromDrawer = drawerOpen;
 
     const userMessage: ChatMessage = { role: 'user', content, timestamp: Date.now() };
     const nextMessages = [...messages, userMessage];
     setMessages(nextMessages);
     setDraftMessage('');
-    setChatOpen(true);
+    setQuickInputOpen(!submittedFromDrawer);
+    setDrawerOpen(submittedFromDrawer);
     setAnimation(getNextAnimationState('send'));
     setSelectedStatus('thinking');
 
@@ -618,7 +776,11 @@ function App() {
       const message = error instanceof Error ? error.message : 'Hermes could not complete that.';
       setMessages((current) => [...current, { role: 'assistant', content: message, timestamp: Date.now() }]);
       setAnimation(getNextAnimationState('error'));
-      setSelectedStatus('thinking');
+      setSelectedStatus('talking');
+      window.setTimeout(() => {
+        setAnimation(getNextAnimationState('timeout'));
+        setSelectedStatus('idle');
+      }, runtime.settings.lowResourceMode ? 900 : 2200);
     }
   };
 
@@ -637,13 +799,15 @@ function App() {
             runtime={runtime}
             onClose={() => void hidePanelWindow(panelWindow)}
             onSelect={(id) => updateRuntime((state) => { state.selectedCompanionId = id; })}
-            onToggleVisibility={(id) => updateRuntime((state) => {
-              state.companions = state.companions.map((companion) => {
-                if (companion.id !== id) return companion;
-                const visible = !companion.visible;
-                return { ...companion, visible, status: visible ? 'idle' : 'hidden' };
+            onToggleVisibility={(id) => {
+              const visible = !(runtime.companions.find((companion) => companion.id === id)?.visible ?? false);
+              updateRuntime((state) => {
+                state.companions = state.companions.map((companion) => (
+                  companion.id === id ? { ...companion, visible, status: visible ? 'idle' : 'hidden' } : companion
+                ));
               });
-            })}
+              void (visible ? showCompanionWindow(id) : hideCompanionWindow(id));
+            }}
             onAddCompanion={() => setRuntime((current) => addCompanion(current))}
           />
         ) : null}
@@ -657,7 +821,10 @@ function App() {
             source={appearanceSource}
             onClose={() => void hidePanelWindow(panelWindow)}
             onNameChange={(name) => updateSelectedCompanion({ name })}
-            onVisibilityChange={(visible) => updateSelectedCompanion({ visible, status: visible ? 'idle' : 'hidden' })}
+            onVisibilityChange={(visible) => {
+              updateSelectedCompanion({ visible, status: visible ? 'idle' : 'hidden' });
+              void (visible ? showCompanionWindow(selectedCompanion.id) : hideCompanionWindow(selectedCompanion.id));
+            }}
             onScaleChange={(scale) => updateSelectedCompanion({ scale })}
             onAnimationPreview={(nextAnimation) => {
               setAnimation(nextAnimation);
@@ -694,13 +861,22 @@ function App() {
   }
 
   return (
-    <main className="desktop-companion-shell">
-      {chatOpen && runtime.settings.showSpeechBubbles && !runtime.settings.quietMode ? (
-        <SpeechBubble message={activeMessage?.content ?? ''} />
+    <main className="desktop-companion-shell" style={companionStyle}>
+      {shouldShowBubble ? (
+        <AvatarBubble
+          message={bubbleCopy}
+          longMessage={Boolean(activeMessage?.content && isLongAssistantMessage(activeMessage.content))}
+          unreadCount={unreadAssistantCount}
+          thinking={selectedCompanion.status === 'thinking'}
+          onOpenDrawer={() => {
+            setDrawerOpen(true);
+            setQuickInputOpen(false);
+          }}
+        />
       ) : null}
 
       <section className="companion-stage" aria-label="Hermes desktop companion">
-        {[selectedCompanion].filter((companion) => companion.visible).map((companion) => (
+        {[selectedCompanion].filter((companion) => routeCompanionId ? Boolean(companion) : companion.visible).map((companion) => (
           <button
             key={companion.id}
             className={`companion-figure-button ${companion.id === selectedCompanion.id ? 'selected' : ''}`}
@@ -729,6 +905,11 @@ function App() {
         <CompanionContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
+          onOpenChat={() => {
+            setContextMenu(null);
+            setDrawerOpen(true);
+            setQuickInputOpen(false);
+          }}
           onOpenPanel={(panel) => {
             setContextMenu(null);
             void showPanelWindow(panel);
@@ -736,23 +917,116 @@ function App() {
         />
       ) : null}
 
-      {chatOpen ? (
-        <ChatInput
+      {quickInputOpen ? (
+        <QuickChatInput
           value={draftMessage}
           disabled={selectedCompanion.status === 'hidden'}
           onChange={setDraftMessage}
           onSubmit={handleSubmit}
         />
       ) : null}
+
+      {drawerOpen ? (
+        <ChatDrawer
+          side={drawerSide}
+          companionName={selectedCompanion.name}
+          companionStatus={selectedCompanion.status}
+          appearanceUrl={activeAvatarFrameUrl}
+          messages={messages}
+          value={draftMessage}
+          disabled={selectedCompanion.status === 'hidden'}
+          onChange={setDraftMessage}
+          onSubmit={handleSubmit}
+          onClose={() => setDrawerOpen(false)}
+        />
+      ) : null}
     </main>
   );
 }
 
-function SpeechBubble({ message }: { message: string }) {
+function AvatarBubble({
+  message,
+  longMessage,
+  unreadCount,
+  thinking,
+  onOpenDrawer,
+}: {
+  message: string;
+  longMessage: boolean;
+  unreadCount: number;
+  thinking: boolean;
+  onOpenDrawer: () => void;
+}) {
   return (
-    <aside className="speech-bubble" aria-live="polite">
+    <button type="button" className="avatar-bubble" aria-live="polite" onClick={onOpenDrawer}>
       <p>{message}</p>
-    </aside>
+      {thinking ? (
+        <span className="thinking-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      ) : null}
+      {unreadCount > 1 ? <span className="unread-badge">+{Math.min(9, unreadCount - 1)}</span> : null}
+      {longMessage ? <span className="bubble-open-chat">Open chat</span> : null}
+    </button>
+  );
+}
+
+function ChatDrawer({
+  side,
+  companionName,
+  companionStatus,
+  appearanceUrl,
+  messages,
+  value,
+  disabled,
+  onChange,
+  onSubmit,
+  onClose,
+}: {
+  side: 'left' | 'right';
+  companionName: string;
+  companionStatus: CompanionStatus;
+  appearanceUrl: string;
+  messages: ChatMessage[];
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  onSubmit: (event: FormEvent) => void;
+  onClose: () => void;
+}) {
+  const statusCopy = companionStatus === 'thinking' ? 'Thinking' : companionStatus === 'talking' ? 'Reply ready' : 'Ready';
+
+  return (
+    <>
+      <button type="button" className="chat-drawer-scrim" aria-label="Close chat" onClick={onClose} />
+      <aside className={`chat-drawer chat-drawer-${side}`} aria-label={`${companionName} full chat`}>
+        <header className="drawer-header" onPointerDown={handleNativeDragPointerDown}>
+          <span className="drawer-title">
+            <span className="drawer-avatar" aria-hidden="true">
+              <img src={appearanceUrl} alt="" />
+            </span>
+            <span>
+              <strong>{companionName}</strong>
+              <small>{statusCopy}</small>
+            </span>
+          </span>
+          <button type="button" className="drawer-close-button" onClick={onClose} aria-label="Close chat">
+            <X size={20} aria-hidden="true" />
+          </button>
+        </header>
+        <div className="drawer-message-list">
+          {messages.length > 4 ? <span className="history-collapsed">Earlier history collapsed</span> : null}
+          {messages.map((message, index) => (
+            <article key={`${message.timestamp}-${index}`} className={`drawer-message drawer-message-${message.role}`}>
+              <p>{message.content}</p>
+            </article>
+          ))}
+        </div>
+        <FullChatInput value={value} disabled={disabled} onChange={onChange} onSubmit={onSubmit} />
+      </aside>
+    </>
   );
 }
 
@@ -767,14 +1041,20 @@ function PanelWindowShell({ panel, children }: { panel: PanelWindow; children: R
 function CompanionContextMenu({
   x,
   y,
+  onOpenChat,
   onOpenPanel,
 }: {
   x: number;
   y: number;
+  onOpenChat: () => void;
   onOpenPanel: (panel: PanelWindow) => void;
 }) {
   return (
     <nav className="companion-context-menu" style={{ left: x, top: y }} aria-label="Companion menu" onPointerDown={(event) => event.stopPropagation()}>
+      <button type="button" onClick={onOpenChat}>
+        <MessageCircle aria-hidden="true" />
+        <span>Open Chat</span>
+      </button>
       <button type="button" onClick={() => onOpenPanel('companions')}>
         <UserRound aria-hidden="true" />
         <span>Companions</span>
@@ -872,34 +1152,38 @@ function AppearancePopover({
 
   return (
     <section className="glass-popover appearance-popover" aria-label="Appearance">
-      <PopoverHeader icon={<UserRound size={22} />} title="Appearance" onClose={onClose} />
-      <div className="appearance-grid">
+      <PopoverHeader icon={<Feather size={22} />} title="Appearance" onClose={onClose} />
+      <div className="appearance-identity">
         <img className="portrait-preview" src={appearance.thumbnailUrl} alt={`${companion.name} portrait preview`} />
-        <label className="field-label">
-          <span>Name</span>
-          <span className="text-field">
-            <input value={companion.name} onChange={(event) => onNameChange(event.target.value)} aria-label="Name" />
-            <Edit3 size={18} aria-hidden="true" />
-          </span>
-        </label>
+        <div className="appearance-controls">
+          <label className="field-label">
+            <span>Name</span>
+            <span className="text-field">
+              <input value={companion.name} onChange={(event) => onNameChange(event.target.value)} aria-label="Name" />
+              <Edit3 size={18} aria-hidden="true" />
+            </span>
+          </label>
+          <label className="settings-row">
+            <span>Show on desktop</span>
+            <button type="button" className={`switch ${companion.visible ? 'on' : ''}`} onClick={() => onVisibilityChange(!companion.visible)} aria-label="Show on desktop">
+              <span />
+            </button>
+          </label>
+          <label className="size-row">
+            <span>Size</span>
+            <input type="range" min="0.62" max="1.18" step="0.01" value={companion.scale} onChange={(event) => onScaleChange(Number(event.target.value))} aria-label="Size" />
+            <strong>{Math.round(companion.scale * 100)}%</strong>
+          </label>
+        </div>
       </div>
-      <label className="settings-row">
-        <span>Show on desktop</span>
-        <button type="button" className={`switch ${companion.visible ? 'on' : ''}`} onClick={() => onVisibilityChange(!companion.visible)} aria-label="Show on desktop">
-          <span />
-        </button>
-      </label>
-      <label className="size-row">
-        <span>Size</span>
-        <input type="range" min="0.62" max="1.18" step="0.01" value={companion.scale} onChange={(event) => onScaleChange(Number(event.target.value))} aria-label="Size" />
-        <strong>{Math.round(companion.scale * 100)}%</strong>
-      </label>
-      <div className="appearance-tabs" role="tablist" aria-label="Appearance source">
-        <button type="button" className={source === 'preset' ? 'active' : ''} role="tab" aria-selected={source === 'preset'} onClick={() => onSourceChange('preset')}>Preset</button>
-        <button type="button" className={source === 'generated' ? 'active' : ''} role="tab" aria-selected={source === 'generated'} onClick={() => onSourceChange('generated')}>Generate</button>
-        <button type="button" className={source === 'uploaded' ? 'active' : ''} role="tab" aria-selected={source === 'uploaded'} onClick={() => onSourceChange('uploaded')}>Upload</button>
+      <div className="appearance-source-block">
+        <div className="appearance-tabs" role="tablist" aria-label="Appearance source">
+          <button type="button" className={source === 'preset' ? 'active' : ''} role="tab" aria-selected={source === 'preset'} onClick={() => onSourceChange('preset')}>Preset</button>
+          <button type="button" className={source === 'generated' ? 'active' : ''} role="tab" aria-selected={source === 'generated'} onClick={() => onSourceChange('generated')}>Generate</button>
+          <button type="button" className={source === 'uploaded' ? 'active' : ''} role="tab" aria-selected={source === 'uploaded'} onClick={() => onSourceChange('uploaded')}>Upload</button>
+        </div>
+        <AppearanceSourceNotice source={source} />
       </div>
-      <AppearanceSourceNotice source={source} />
       <div className="animation-section">
         <span className="section-label">Animation</span>
         <div className="animation-grid">
@@ -961,20 +1245,22 @@ function SettingsPopover({
   onChange: (patch: Partial<AppSettings>) => void;
 }) {
   if (!open) return null;
+  const BridgeIcon = bridgeUnavailable ? WifiOff : bridgeMode === 'mock' ? CircleAlert : Wifi;
+  const bridgeStateClass = bridgeUnavailable ? 'unavailable' : bridgeMode === 'mock' ? 'mock' : 'connected';
 
   return (
     <section className="glass-popover settings-popover" aria-label="Settings">
       <PopoverHeader icon={<Settings size={22} />} title="Settings" onClose={onClose} />
-      <SettingToggle icon={<Sparkles size={18} />} label="Launch at startup" checked={settings.launchAtStartup} onChange={(value) => onChange({ launchAtStartup: value })} />
-      <SettingToggle icon={<Eye size={18} />} label="Always on top" checked={settings.alwaysOnTop} onChange={(value) => onChange({ alwaysOnTop: value })} />
-      <SettingToggle icon={<Grid2X2 size={18} />} label="Remember positions" checked={settings.rememberPositions} onChange={(value) => onChange({ rememberPositions: value })} />
-      <SettingToggle icon={<Hand size={18} />} label="Allow dragging" checked={settings.allowDragging} onChange={(value) => onChange({ allowDragging: value })} />
+      <SettingToggle icon={<Power size={18} />} label="Launch at startup" checked={settings.launchAtStartup} onChange={(value) => onChange({ launchAtStartup: value })} />
+      <SettingToggle icon={<Pin size={18} />} label="Always on top" checked={settings.alwaysOnTop} onChange={(value) => onChange({ alwaysOnTop: value })} />
+      <SettingToggle icon={<MapPin size={18} />} label="Remember positions" checked={settings.rememberPositions} onChange={(value) => onChange({ rememberPositions: value })} />
+      <SettingToggle icon={<Move size={18} />} label="Allow dragging" checked={settings.allowDragging} onChange={(value) => onChange({ allowDragging: value })} />
       <SettingToggle icon={<MessageCircle size={18} />} label="Show speech bubbles" checked={settings.showSpeechBubbles} onChange={(value) => onChange({ showSpeechBubbles: value })} />
       <SettingToggle icon={<Moon size={18} />} label="Quiet mode" checked={settings.quietMode} onChange={(value) => onChange({ quietMode: value })} />
-      <SettingToggle icon={<Shield size={18} />} label="Click-through mode" checked={settings.clickThrough} onChange={(value) => onChange({ clickThrough: value })} />
-      <SettingToggle icon={<Bell size={18} />} label="Low resource mode" checked={settings.lowResourceMode} onChange={(value) => onChange({ lowResourceMode: value })} />
-      <div className={`bridge-state ${bridgeUnavailable ? 'unavailable' : ''}`}>
-        {bridgeUnavailable ? <WifiOff size={18} aria-hidden="true" /> : <Sparkles size={18} aria-hidden="true" />}
+      <SettingToggle icon={<MousePointer2 size={18} />} label="Click-through mode" checked={settings.clickThrough} onChange={(value) => onChange({ clickThrough: value })} />
+      <SettingToggle icon={<Gauge size={18} />} label="Low resource mode" checked={settings.lowResourceMode} onChange={(value) => onChange({ lowResourceMode: value })} />
+      <div className={`bridge-state ${bridgeStateClass}`}>
+        <BridgeIcon size={18} aria-hidden="true" />
         <span>{getProviderStatusCopy(bridgeConfigMode, bridgeMode, bridgeUnavailable)}</span>
       </div>
     </section>
@@ -1034,7 +1320,7 @@ function PopoverHeader({
   );
 }
 
-function ChatInput({
+function QuickChatInput({
   value,
   disabled,
   onChange,
@@ -1046,8 +1332,34 @@ function ChatInput({
   onSubmit: (event: FormEvent) => void;
 }) {
   return (
-    <form className="chat-input-capsule" onSubmit={onSubmit}>
-      <Sparkles size={24} aria-hidden="true" />
+    <form className="quick-chat-input" onSubmit={onSubmit}>
+      <input
+        value={value}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        placeholder="Ask Hermes..."
+        aria-label="Ask Hermes"
+      />
+      <button type="submit" className="send-button" aria-label="Send message">
+        <Send size={22} aria-hidden="true" />
+      </button>
+    </form>
+  );
+}
+
+function FullChatInput({
+  value,
+  disabled,
+  onChange,
+  onSubmit,
+}: {
+  value: string;
+  disabled: boolean;
+  onChange: (value: string) => void;
+  onSubmit: (event: FormEvent) => void;
+}) {
+  return (
+    <form className="full-chat-input" onSubmit={onSubmit}>
       <input
         value={value}
         disabled={disabled}
@@ -1056,7 +1368,7 @@ function ChatInput({
         aria-label="Ask Hermes anything"
       />
       <button type="submit" className="send-button" aria-label="Send message">
-        <Send size={22} aria-hidden="true" />
+        <Send size={18} aria-hidden="true" />
       </button>
     </form>
   );

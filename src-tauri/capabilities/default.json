@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Default window permissions for Hermes Guild.",
-  "windows": ["main", "pet", "appearance", "companions", "settings"],
+  "windows": ["main", "pet", "appearance", "companions", "settings", "companion-*"],
   "permissions": [
     "core:default",
     "core:window:allow-start-dragging",

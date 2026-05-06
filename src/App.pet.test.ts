@@ -8,8 +8,10 @@ import App, {
   getAppearanceSourceMessage,
   getCompanionProviderMode,
   getNextAnimationState,
+  syncCompanionsWithBridgeProfiles,
 } from './App';
 import type { HermesBridgeApi } from './bridge/types';
+import type { BridgeSnapshot, CreateTaskInput } from './types';
 
 describe('Hermes companion runtime', () => {
   test('default render is companion-first and not a dashboard', () => {
@@ -57,6 +59,33 @@ describe('Hermes companion runtime', () => {
     }
   });
 
+  test('profile-specific pet routes keep window companion identity', () => {
+    const originalWindow = globalThis.window;
+
+    try {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: { location: { search: '?mode=pet&companion=astra' } },
+      });
+      const astraHtml = renderToStaticMarkup(React.createElement(App));
+      expect(astraHtml).toContain('aria-label="Chat with Astra"');
+      expect(astraHtml).not.toContain('aria-label="Chat with Hermes"');
+
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: { location: { search: '?mode=pet&companion=orion' } },
+      });
+      const orionHtml = renderToStaticMarkup(React.createElement(App));
+      expect(orionHtml).toContain('aria-label="Chat with Orion"');
+      expect(orionHtml).not.toContain('aria-label="Chat with Astra"');
+    } finally {
+      Object.defineProperty(globalThis, 'window', {
+        configurable: true,
+        value: originalWindow,
+      });
+    }
+  });
+
   test('initial companion state follows the PRD data model', () => {
     const state = createInitialCompanionState();
 
@@ -74,10 +103,10 @@ describe('Hermes companion runtime', () => {
       source: 'preset',
       frameWidth: 1254,
       frameHeight: 1254,
-      framesPerRow: 8,
+      framesPerRow: 10,
       rows: { idle: 0, talk: 1, think: 2, wave: 3 },
     });
-    expect(state.appearances[0].frameUrls).toHaveLength(8);
+    expect(state.appearances[0].frameUrls).toHaveLength(10);
     expect(state.settings).toMatchObject({
       alwaysOnTop: true,
       rememberPositions: true,
@@ -120,7 +149,6 @@ describe('Hermes companion runtime', () => {
     const provider = createCompanionChatProvider({
       mode: 'hermes',
       bridge,
-      waitTimeoutMs: 200,
       pollIntervalMs: 1,
     });
 
@@ -131,6 +159,49 @@ describe('Hermes companion runtime', () => {
       role: 'assistant',
       content: 'Finished Hermes output.',
     });
+  });
+
+  test('real chat provider routes by selected companion profile id', async () => {
+    const submitted: CreateTaskInput[] = [];
+    const bridge = bridgeThatRecordsAssignees(submitted);
+    const provider = createCompanionChatProvider({
+      mode: 'hermes',
+      bridge,
+      pollIntervalMs: 1,
+    });
+
+    await provider.sendMessage({
+      companionId: 'reviewer-profile',
+      messages: [{ role: 'user', content: 'check this', timestamp: 1 }],
+    });
+    await provider.sendMessage({
+      companionId: 'builder-profile',
+      messages: [{ role: 'user', content: 'build this', timestamp: 2 }],
+    });
+
+    expect(submitted.map((input) => input.assigneeId)).toEqual(['reviewer-profile', 'builder-profile']);
+    expect(submitted.map((input) => input.type)).toEqual(['pet', 'pet']);
+  });
+
+  test('real bridge profiles hydrate companion rows without mock fallback', () => {
+    const state = createInitialCompanionState();
+    const snapshot = bridgeSnapshotWithProfiles();
+    const next = syncCompanionsWithBridgeProfiles(state, snapshot, 'hermes');
+
+    expect(next.companions.map((companion) => companion.id)).toEqual(['builder-profile', 'reviewer-profile', 'profile-unavailable']);
+    expect(next.companions[0]).toMatchObject({
+      id: 'builder-profile',
+      name: 'Builder Profile',
+      visible: true,
+      agent: {
+        agentId: 'builder-profile',
+        source: 'cli',
+        executionRouting: 'supported',
+      },
+    });
+    expect(next.companions[2].description).toContain('hermes profile list failed');
+    expect(next.companions[2].agent?.source).toBe('unavailable');
+    expect(next.selectedCompanionId).toBe('builder-profile');
   });
 
   test('dialog actions have concrete state and honest placeholder copy', () => {
@@ -150,6 +221,75 @@ describe('Hermes companion runtime', () => {
     expect(getAppearanceSourceMessage('uploaded')).toContain('not connected yet');
   });
 });
+
+function bridgeSnapshotWithProfiles(): BridgeSnapshot {
+  return {
+    agents: [
+      {
+        id: 'builder-profile',
+        name: 'Builder Profile',
+        role: 'Builder',
+        source: 'cli',
+        executionRouting: 'supported',
+        status: 'idle',
+        availability: 'available',
+        activeInPet: true,
+        skills: [],
+        traits: [],
+        bestFor: '',
+        avoid: '',
+        health: 'Mapped from profile list',
+        equipment: [],
+      },
+      {
+        id: 'reviewer-profile',
+        name: 'Reviewer Profile',
+        role: 'Reviewer',
+        source: 'local-state',
+        executionRouting: 'supported',
+        status: 'idle',
+        availability: 'available',
+        activeInPet: false,
+        skills: [],
+        traits: [],
+        bestFor: '',
+        avoid: '',
+        health: 'Mapped from profile list',
+        equipment: [],
+      },
+      {
+        id: 'profile-unavailable',
+        name: 'Profile unavailable',
+        role: 'Builder',
+        source: 'unavailable',
+        executionRouting: 'unsupported',
+        unavailableReason: 'hermes profile list failed',
+        status: 'error',
+        availability: 'offline',
+        activeInPet: false,
+        skills: [],
+        traits: [],
+        bestFor: '',
+        avoid: '',
+        health: 'hermes profile list failed',
+        equipment: [],
+      },
+    ],
+    activeProfileId: 'builder-profile',
+    tasks: [],
+    reports: [],
+    systemStatus: {
+      gatewayStatus: 'connected',
+      providerHealth: 'healthy',
+      bridgeMode: 'real',
+      activeImplementation: 'real',
+      hermesAvailable: 'available',
+      logsSummary: 'Hermes available',
+      warnings: [],
+    },
+    petPosition: { x: 0, y: 0 },
+  };
+}
 
 function bridgeThatFinishesAfterPolling(): HermesBridgeApi {
   let snapshotReads = 0;
@@ -178,28 +318,23 @@ function bridgeThatFinishesAfterPolling(): HermesBridgeApi {
           assigneeId: 'agent-1',
           brief: 'finish this',
           type: 'pet',
-          state: snapshotReads > 2 ? 'needs_review' : 'running',
+          state: snapshotReads > 2 ? 'completed' : 'running',
           progress: snapshotReads > 2 ? 100 : 25,
           artifacts: [],
-          timeline: [],
-          reviewStatus: snapshotReads > 2 ? 'required' : 'none',
+          timeline: snapshotReads > 2 ? [{
+            id: 'timeline-1',
+            taskId: 'task-1',
+            agentId: 'agent-1',
+            type: 'completed',
+            message: 'Finished Hermes output.',
+            timestamp: '2026-05-06T00:00:00.000Z',
+            source: 'hermes',
+          }] : [],
+          reviewStatus: 'none',
           createdAt: '2026-05-06T00:00:00.000Z',
           updatedAt: '2026-05-06T00:00:00.000Z',
         }],
-        reports: snapshotReads > 2 ? [{
-          id: 'report-1',
-          taskId: 'task-1',
-          agentId: 'agent-1',
-          title: 'Report',
-          summary: 'Finished Hermes output.',
-          artifacts: [],
-          facts: [],
-          assumptions: [],
-          knownGaps: [],
-          recommendedNextAction: '',
-          reviewItems: [],
-          createdAt: '2026-05-06T00:00:00.000Z',
-        }] : [],
+        reports: [],
         systemStatus: {
           gatewayStatus: 'connected',
           providerHealth: 'healthy',
@@ -215,6 +350,53 @@ function bridgeThatFinishesAfterPolling(): HermesBridgeApi {
     subscribe: () => () => undefined,
     setActiveProfile: () => undefined,
     createTask: () => 'task-1',
+    approveReport: () => undefined,
+    requestRevision: () => undefined,
+    simulateBlocked: () => undefined,
+    simulateError: () => undefined,
+    setPetPosition: () => undefined,
+  } satisfies HermesBridgeApi;
+
+  return bridge;
+}
+
+function bridgeThatRecordsAssignees(submitted: CreateTaskInput[]): HermesBridgeApi {
+  let reportTaskId = '';
+  const snapshot = bridgeSnapshotWithProfiles();
+  const bridge = {
+    getSnapshot: () => ({
+      ...snapshot,
+      tasks: reportTaskId ? [{
+        id: reportTaskId,
+        title: 'Task',
+        assigneeId: submitted.at(-1)?.assigneeId ?? 'builder-profile',
+        brief: submitted.at(-1)?.brief ?? 'Task',
+        type: 'pet',
+        state: 'completed',
+        progress: 100,
+        artifacts: [],
+        timeline: [{
+          id: `timeline-${reportTaskId}`,
+          taskId: reportTaskId,
+          agentId: submitted.at(-1)?.assigneeId ?? 'builder-profile',
+          type: 'completed',
+          message: `Finished ${submitted.at(-1)?.assigneeId}.`,
+          timestamp: '2026-05-06T00:00:00.000Z',
+          source: 'hermes',
+        }],
+        reviewStatus: 'none',
+        createdAt: '2026-05-06T00:00:00.000Z',
+        updatedAt: '2026-05-06T00:00:00.000Z',
+      }] : [],
+      reports: [],
+    }),
+    subscribe: () => () => undefined,
+    setActiveProfile: () => undefined,
+    createTask: (input: CreateTaskInput) => {
+      submitted.push(input);
+      reportTaskId = `task-${submitted.length}`;
+      return reportTaskId;
+    },
     approveReport: () => undefined,
     requestRevision: () => undefined,
     simulateBlocked: () => undefined,

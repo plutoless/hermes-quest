@@ -402,9 +402,20 @@ export class RealHermesBridge implements HermesBridgeApi {
   }
 
   markUnavailable(message: string) {
-    this.snapshot.agents = this.snapshot.agents.map((agent) =>
-      agent.id === this.snapshot.activeProfileId ? { ...agent, status: 'error', availability: 'offline' } : agent,
+    const unavailableAgent = this.agentFromProfile(
+      {
+        id: 'profile-unavailable',
+        name: 'Profile unavailable',
+        source: 'unavailable',
+        executionRouting: 'unsupported',
+        unavailableReason: message,
+      },
+      0,
+      true,
+      { status: 'error', availability: 'offline' },
     );
+    this.snapshot.activeProfileId = unavailableAgent.id;
+    this.snapshot.agents = [unavailableAgent];
     this.snapshot.systemStatus = {
       ...this.snapshot.systemStatus,
       gatewayStatus: 'error',
@@ -673,7 +684,7 @@ export class RealHermesBridge implements HermesBridgeApi {
     }
     const result = await runClient.runTask({
       input: this.promptForTask(task),
-      instructions: 'Return a concise final answer suitable for a Quest Report Card.',
+      instructions: this.instructionsForTask(task),
       sessionId: task.id,
       profile,
       profileRoutingSupported: profileContext.routingSource === 'public-rest' || profileContext.routingSource === 'gateway-rest',
@@ -734,6 +745,11 @@ export class RealHermesBridge implements HermesBridgeApi {
   }
 
   private completeTask(task: Task, finalOutput: string) {
+    if (task.type === 'pet') {
+      this.completePetMessage(task, finalOutput);
+      return;
+    }
+
     const artifacts = this.artifactsForTask(task, finalOutput);
     const report = this.reportForTask(task, artifacts, finalOutput);
     this.updateTask(task.id, {
@@ -767,6 +783,38 @@ export class RealHermesBridge implements HermesBridgeApi {
     };
     this.emit(makeEvent('task_completed', task.assigneeId, task.id));
     this.emit(makeEvent('review_required', task.assigneeId, task.id, { reportId: report.id }));
+  }
+
+  private completePetMessage(task: Task, finalOutput: string) {
+    this.updateTask(task.id, {
+      state: 'completed',
+      progress: 100,
+      artifacts: [],
+      reviewStatus: 'none',
+      timeline: [
+        ...task.timeline,
+        this.timeline(task.id, task.assigneeId, 'completed', finalOutput, 'hermes'),
+      ],
+    });
+    this.snapshot.reports = this.snapshot.reports.filter((item) => item.taskId !== task.id);
+    this.snapshot.agents = this.snapshot.agents.map((agent) =>
+      agent.id === task.assigneeId
+        ? { ...agent, status: 'idle', availability: 'available', currentTaskId: undefined, lastReportId: undefined }
+        : agent,
+    );
+    this.snapshot.systemStatus = {
+      ...this.snapshot.systemStatus,
+      gatewayStatus: 'connected',
+      providerHealth: 'healthy',
+      bridgeMode: this.snapshot.systemStatus.bridgeMode,
+      activeImplementation: 'real',
+      hermesAvailable: this.snapshot.systemStatus.hermesAvailable,
+      hermesApiBaseUrl: this.config.hermesApiBaseUrl,
+      hermesDashboardBaseUrl: this.config.hermesDashboardBaseUrl,
+      logsSummary: `Bridge mode: real. Hermes chat output returned for ${this.agentName(task.assigneeId)}.`,
+      warnings: this.snapshot.systemStatus.warnings,
+    };
+    this.emit(makeEvent('task_completed', task.assigneeId, task.id));
   }
 
   private failTask(task: Task | undefined, message: string) {
@@ -865,6 +913,16 @@ export class RealHermesBridge implements HermesBridgeApi {
   }
 
   private promptForTask(task: Task) {
+    if (task.type === 'pet') {
+      return [
+        'Hermes Guild Pet Mode message:',
+        task.brief,
+        task.context ? `Context:\n${task.context}` : undefined,
+      ]
+        .filter(Boolean)
+        .join('\n\n');
+    }
+
     return [
       'Hermes Guild quest brief:',
       task.brief,
@@ -875,6 +933,20 @@ export class RealHermesBridge implements HermesBridgeApi {
     ]
       .filter(Boolean)
       .join('\n\n');
+  }
+
+  private instructionsForTask(task: Task) {
+    if (task.type === 'pet') {
+      return [
+        'You are replying inside Hermes Guild Pet Mode.',
+        'Answer the user directly and conversationally.',
+        'Do not format the response as a Quest Report Card.',
+        'Do not reject short casual messages for lacking a task objective.',
+        'If the user greets you, greet them back briefly and ask how you can help.',
+      ].join(' ');
+    }
+
+    return 'Return a concise final answer suitable for a Quest Report Card.';
   }
 
   private timeline(taskId: string, agentId: string | undefined, type: TimelineEvent['type'], message: string, source: TimelineEvent['source']) {

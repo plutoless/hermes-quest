@@ -1,6 +1,6 @@
 export type AgentStatus = 'idle' | 'thinking' | 'running' | 'blocked' | 'needs_review' | 'error';
 export type AgentAvailability = 'available' | 'busy' | 'offline';
-export type TaskState = 'created' | 'assigned' | 'running' | 'blocked' | 'needs_review' | 'approved' | 'error';
+export type TaskState = 'created' | 'assigned' | 'running' | 'blocked' | 'completed' | 'needs_review' | 'approved' | 'error';
 export type ReviewStatus = 'none' | 'required' | 'approved' | 'revision_requested';
 export type TimelineSource = 'guild' | 'bridge' | 'hermes';
 
@@ -280,6 +280,9 @@ export interface Companion {
     agentId?: string;
     provider?: string;
     model?: string;
+    source?: SystemDataSource;
+    executionRouting?: Agent['executionRouting'];
+    unavailableReason?: string;
   };
 }
 

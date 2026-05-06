@@ -1,7 +1,9 @@
 use serde::Serialize;
 use serde_json::{json, Value};
 use std::{
+    collections::hash_map::DefaultHasher,
     fs,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     process::Command,
     thread,
@@ -9,7 +11,7 @@ use std::{
 };
 #[cfg(desktop)]
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
+use tauri::{AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent};
 
 const PANEL_WINDOWS: [&str; 3] = ["appearance", "companions", "settings"];
 
@@ -394,6 +396,70 @@ fn hide_panel(app: &AppHandle, panel: &str) -> Result<(), String> {
         .map_err(|error| format!("Failed to hide {panel} window: {error}"))
 }
 
+fn companion_window_label(companion_id: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    companion_id.hash(&mut hasher);
+    format!("companion-{}-{:x}", slug_from_name(companion_id), hasher.finish())
+}
+
+fn percent_encode_query(value: &str) -> String {
+    value
+        .bytes()
+        .map(|byte| {
+            if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'.' | b'_' | b'~') {
+                (byte as char).to_string()
+            } else {
+                format!("%{byte:02X}")
+            }
+        })
+        .collect::<String>()
+}
+
+fn is_companion_window(label: &str) -> bool {
+    label.starts_with("companion-")
+}
+
+fn show_companion(app: &AppHandle, companion_id: &str) -> Result<(), String> {
+    let label = companion_window_label(companion_id);
+    if let Some(window) = app.get_webview_window(&label) {
+        window
+            .show()
+            .map_err(|error| format!("Failed to show companion window: {error}"))?;
+        window
+            .unminimize()
+            .map_err(|error| format!("Failed to unminimize companion window: {error}"))?;
+        window
+            .set_focus()
+            .map_err(|error| format!("Failed to focus companion window: {error}"))?;
+        return Ok(());
+    }
+
+    let url = format!("/?mode=pet&companion={}", percent_encode_query(companion_id));
+    WebviewWindowBuilder::new(app, label, WebviewUrl::App(url.into()))
+        .title(format!("Hermes Companion: {companion_id}"))
+        .inner_size(460.0, 420.0)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .visible(true)
+        .shadow(false)
+        .build()
+        .map_err(|error| format!("Failed to create companion window: {error}"))?;
+
+    Ok(())
+}
+
+fn hide_companion(app: &AppHandle, companion_id: &str) -> Result<(), String> {
+    let label = companion_window_label(companion_id);
+    let Some(window) = app.get_webview_window(&label) else {
+        return Ok(());
+    };
+    window
+        .hide()
+        .map_err(|error| format!("Failed to hide companion window: {error}"))
+}
+
 #[tauri::command]
 async fn show_hall_window(app: AppHandle) -> Result<(), String> {
     show_hall(&app)
@@ -412,6 +478,16 @@ async fn show_panel_window(app: AppHandle, panel: String) -> Result<(), String> 
 #[tauri::command]
 async fn hide_panel_window(app: AppHandle, panel: String) -> Result<(), String> {
     hide_panel(&app, &panel)
+}
+
+#[tauri::command]
+async fn show_companion_window(app: AppHandle, companion_id: String) -> Result<(), String> {
+    show_companion(&app, &companion_id)
+}
+
+#[tauri::command]
+async fn hide_companion_window(app: AppHandle, companion_id: String) -> Result<(), String> {
+    hide_companion(&app, &companion_id)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -474,10 +550,12 @@ pub fn run() {
             show_hall_window,
             show_pet_window,
             show_panel_window,
-            hide_panel_window
+            hide_panel_window,
+            show_companion_window,
+            hide_companion_window
         ])
         .on_window_event(|window, event| {
-            if is_panel_window(window.label()) {
+            if is_panel_window(window.label()) || is_companion_window(window.label()) {
                 if let WindowEvent::CloseRequested { api, .. } = event {
                     api.prevent_close();
                     let _ = window.hide();
@@ -502,4 +580,29 @@ pub fn run() {
             let _ = show_hall(app_handle);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn companion_window_label_is_stable_and_scoped() {
+        let first = companion_window_label("builder-profile");
+        let second = companion_window_label("builder-profile");
+        let other = companion_window_label("reviewer profile");
+
+        assert_eq!(first, second);
+        assert!(first.starts_with("companion-builder-profile-"));
+        assert!(other.starts_with("companion-reviewer-profile-"));
+        assert_ne!(first, other);
+        assert!(is_companion_window(&first));
+        assert!(!is_companion_window("companions"));
+    }
+
+    #[test]
+    fn companion_query_param_is_percent_encoded() {
+        assert_eq!(percent_encode_query("builder-profile"), "builder-profile");
+        assert_eq!(percent_encode_query("reviewer profile/中文"), "reviewer%20profile%2F%E4%B8%AD%E6%96%87");
+    }
 }

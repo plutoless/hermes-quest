@@ -84,8 +84,9 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
   const sidecarStatus = health?.ok ? await sidecarClient.checkHealth() : undefined;
   const sidecarCapabilities = health?.ok && sidecarStatus?.ok ? await sidecarClient.getCapabilities() : undefined;
   const gatewayProfileList = health?.ok ? await apiClient.listProfiles?.() : undefined;
-  const rawProfileList = health?.ok && gatewayProfileList?.ok ? gatewayProfileList : health?.ok ? await profileClient?.listProfiles() : undefined;
+  const rawProfileList = gatewayProfileList?.ok ? gatewayProfileList : await profileClient?.listProfiles();
   const profileList = applySidecarExecutionRouting(rawProfileList, sidecarCapabilities?.ok ? sidecarCapabilities.data : undefined);
+  const hasProfileList = Boolean(profileList?.ok && profileList.profiles.length > 0);
 
   if (sanitized.bridgeMode === 'real') {
     const dashboardPatch = statusFromDashboard(sanitized, dashboardStatus);
@@ -93,7 +94,7 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
     realBridge.setRuntimeStatus({
       bridgeMode: 'real',
       activeImplementation: 'real',
-      hermesAvailable: health?.ok ? 'available' : 'unavailable',
+      hermesAvailable: health?.ok || hasProfileList ? 'available' : 'unavailable',
       hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
       ...dashboardPatch,
       ...sidecarPatch,
@@ -104,10 +105,14 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
       warnings: [...(dashboardPatch.warnings ?? []), ...(sidecarPatch.warnings ?? [])],
       logsSummary: health?.ok
         ? `Bridge mode: real. Active implementation: real. Hermes available: ${health.message}. ${dashboardPatch.logsSummary} ${sidecarPatch.logsSummary}`
-        : `Bridge mode: real. Active implementation: real. Hermes unavailable: ${health?.message ?? 'health check failed'}`,
+        : hasProfileList
+          ? `Bridge mode: real. Active implementation: real. Hermes REST unavailable: ${health?.message ?? 'health check failed'}. Profiles discovered from ${profileList?.source}.`
+          : `Bridge mode: real. Active implementation: real. Hermes unavailable: ${health?.message ?? 'health check failed'}`,
     });
-    if (health?.ok) {
+    if (health?.ok || hasProfileList) {
       applyVerifiedProfiles(realBridge, health.profile, profileList);
+    }
+    if (health?.ok) {
       await applyGatewayMetadata(realBridge, apiClient);
       if (sidecarStatus?.ok) {
         await applySidecarCompatibility(realBridge, sidecarClient);
@@ -116,7 +121,7 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
         await applyDashboardCompatibilityInventory(realBridge, dashboardClient);
       }
     }
-    if (health && !health.ok) {
+    if (health && !health.ok && !hasProfileList) {
       realBridge.markUnavailable(health.message);
     }
     return realBridge;
@@ -147,6 +152,22 @@ export async function createBridgeFromConfig(config: Partial<BridgeConfig>, opti
     if (dashboardStatus?.ok) {
       await applyDashboardCompatibilityInventory(realBridge, dashboardClient);
     }
+    return realBridge;
+  }
+
+  if (hasProfileList) {
+    realBridge.setRuntimeStatus({
+      bridgeMode: 'auto',
+      activeImplementation: 'real',
+      hermesAvailable: 'available',
+      hermesApiBaseUrl: sanitized.hermesApiBaseUrl,
+      hermesDashboardBaseUrl: sanitized.hermesDashboardBaseUrl,
+      hermesSidecarBaseUrl: sanitized.hermesSidecarBaseUrl,
+      dashboardAvailable: 'unchecked',
+      sidecarAvailable: 'unchecked',
+      logsSummary: `Bridge mode: auto. Active implementation: real. Hermes REST unavailable: ${health?.message ?? 'health check failed'}. Profiles discovered from ${profileList?.source}.`,
+    });
+    applyVerifiedProfiles(realBridge, undefined, profileList);
     return realBridge;
   }
 
